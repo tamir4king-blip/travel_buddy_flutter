@@ -1,0 +1,450 @@
+================================================================================
+                        TRAVEL BUDDY FLUTTER APP
+                    Technical Documentation & Overview
+================================================================================
+
+================================================================================
+1. TECH STACK
+================================================================================
+
+FRAMEWORK & LANGUAGE
+--------------------
+- Flutter 3.27.4 (Cross-platform UI framework)
+- Dart 3.6.2 (Programming language)
+- Platform: Web (Chrome), iOS, Android ready
+
+STATE MANAGEMENT
+----------------
+- flutter_riverpod ^2.6.1
+  - StateNotifier pattern for reactive state
+  - Provider-based dependency injection
+  - Immutable state with copyWith patterns
+
+NAVIGATION
+----------
+- go_router ^14.8.1
+  - Declarative routing
+  - Deep linking support
+  - Shell routes for bottom navigation
+
+UI & ANIMATIONS
+---------------
+- flutter_animate ^4.5.2
+  - Declarative animation chains
+  - Fade, slide, scale effects
+  - Staggered list animations
+
+- lucide_icons ^0.460.0
+  - Modern icon set
+  - Consistent visual language
+
+UTILITIES
+---------
+- intl ^0.20.2 (Internationalization)
+- equatable ^2.0.7 (Value equality)
+- shared_preferences ^2.5.3 (Local storage)
+
+DEV DEPENDENCIES
+----------------
+- flutter_lints ^5.0.0 (Code quality)
+
+
+================================================================================
+2. ARCHITECTURE
+================================================================================
+
+PROJECT STRUCTURE
+-----------------
+
+lib/
+|-- main.dart                    # App entry point
+|-- core/
+|   |-- theme/
+|   |   |-- app_theme.dart       # Colors, typography, theme data
+|   |-- router/
+|       |-- app_router.dart      # GoRouter configuration
+|
+|-- features/                    # Feature-based organization
+|   |-- home/
+|   |   |-- presentation/
+|   |       |-- screens/
+|   |           |-- home_screen.dart
+|   |-- achievements/
+|   |   |-- presentation/
+|   |       |-- screens/
+|   |       |   |-- achievements_screen.dart
+|   |       |-- widgets/
+|   |           |-- retroactive_claim_modal.dart
+|   |-- quests/
+|   |   |-- presentation/
+|   |       |-- screens/
+|   |           |-- quests_screen.dart
+|   |-- skills/
+|   |   |-- presentation/
+|   |       |-- screens/
+|   |           |-- skills_screen.dart
+|   |-- profile/
+|       |-- presentation/
+|           |-- screens/
+|               |-- profile_screen.dart
+|
+|-- shared/                      # Shared across features
+    |-- models/
+    |   |-- achievement.dart
+    |   |-- side_quest.dart
+    |   |-- skill_group.dart
+    |   |-- user_profile.dart
+    |
+    |-- providers/
+    |   |-- achievements_provider.dart
+    |   |-- quests_provider.dart
+    |   |-- skills_provider.dart
+    |   |-- user_profile_provider.dart
+    |
+    |-- data/
+    |   |-- quest_registry.dart   # 150+ quests
+    |   |-- skill_registry.dart   # 44 skills
+    |
+    |-- widgets/
+        |-- (shared UI components)
+
+
+ARCHITECTURE PATTERN
+--------------------
+- Clean Architecture inspired
+- Feature-first folder structure
+- Separation of concerns:
+  * Presentation (Screens, Widgets)
+  * Business Logic (Providers, Notifiers)
+  * Data (Models, Registries)
+
+
+STATE MANAGEMENT FLOW
+---------------------
+
+                    +------------------+
+                    |    UI Widgets    |
+                    | (ConsumerWidget) |
+                    +--------+---------+
+                             |
+                    ref.watch(provider)
+                             |
+                    +--------v---------+
+                    |   StateNotifier  |
+                    | (Business Logic) |
+                    +--------+---------+
+                             |
+                    state = newState
+                             |
+                    +--------v---------+
+                    |    Immutable     |
+                    |    State Class   |
+                    +------------------+
+
+
+================================================================================
+3. WORKFLOW
+================================================================================
+
+USER FLOW
+---------
+
+1. HOME SCREEN
+   - View profile summary (level, XP, streak)
+   - Quick stats overview
+   - Featured achievements/quests
+
+2. ACHIEVEMENTS TAB
+   - Browse all achievements (15 base achievements)
+   - Filter by tier (Bronze, Silver, Gold, Platinum)
+   - Filter by collection (Cities, Nature, Food, Culture, Photo)
+   - Search achievements
+   - Claim achievements:
+     * Quick claim (instant, full XP)
+     * Retroactive claim (past date, 80% XP)
+
+3. QUESTS TAB
+   - Browse 150+ side quests
+   - Filter by category (18 categories)
+   - Filter by difficulty (Easy, Medium, Hard, Epic)
+   - Complete quests for skill XP
+
+4. SKILLS TAB
+   - View 44 skill groups
+   - Track skill levels and XP
+   - Skill categories:
+     * Outdoor & Nature
+     * Water Sports
+     * Extreme & Adrenaline
+     * Sports & Fitness
+     * Food & Drink
+     * Culture & Arts
+     * Social & Nightlife
+     * Urban & Photography
+     * Travel & Freedom
+
+5. PROFILE TAB
+   - User stats
+   - Level progression
+   - Settings
+
+
+DEVELOPMENT WORKFLOW
+--------------------
+
+1. Start development server:
+   > flutter run -d chrome
+
+2. Hot reload (preserves state):
+   Press 'r' in terminal
+
+3. Hot restart (resets state):
+   Press 'R' in terminal
+
+4. Build for production:
+   > flutter build web
+
+
+================================================================================
+4. FEATURES LIST
+================================================================================
+
+IMPLEMENTED FEATURES
+--------------------
+
+[x] GAMIFICATION SYSTEM
+    - XP-based leveling system
+    - Level progression with XP thresholds
+    - Daily streak tracking
+    - Achievement tiers (Bronze, Silver, Gold, Platinum)
+
+[x] ACHIEVEMENTS (15 achievements)
+    - Tier-based categorization
+    - Collection grouping
+    - Search functionality
+    - Filter by tier/collection
+    - XP rewards per achievement
+
+[x] RETROACTIVE CLAIMING (NEW)
+    - Claim past accomplishments
+    - Date picker for visit date
+    - Notes field for memories
+    - Photo attachment placeholder
+    - 80% XP multiplier for retroactive claims
+    - Visual indicators for retroactive achievements
+
+[x] SIDE QUESTS (150+ quests)
+    - 18 categories:
+      * Fishing, Cooking, Hiking, Skiing
+      * Camping, Photography, Water Sports
+      * Wildlife, Cultural, Adventure
+      * Wellness, Nightlife, Urban
+      * Social, Extreme, Food & Drink
+      * Transportation, Shopping
+    - 3 difficulty levels (Easy, Medium, Hard, Epic)
+    - Repeatable quests with diminishing XP returns
+    - Quest completion tracking
+
+[x] SKILLS SYSTEM (44 skills)
+    - Skill categories:
+      * Outdoor: Hiker, Camper, Angler, Naturalist, Stargazer, Gardener
+      * Water: Diver, Surfer, Sailor, Kayaker, Swimmer
+      * Extreme: Skydiver, Climber, Skier, Snowboarder, Paraglider
+      * Sports: Runner, Cyclist, Yogi, Martial Artist
+      * Food: Chef, Baker, Grill Master, Sommelier, Barista, Mixologist, Foodie
+      * Culture: Historian, Artist, Musician, Linguist
+      * Social: Party Animal, Dancer, Socialite, Volunteer
+      * Urban: Photographer, Explorer, Shopper
+      * Travel: Digital Nomad, Backpacker, Road Tripper, Aviator
+      * Unique: Festival Goer, Sunset Chaser, Aurora Hunter
+    - Max level: 50 per skill
+    - XP per level varies by skill (300-700 XP)
+    - Gradient colors per skill
+
+[x] USER PROFILE
+    - Global level tracking
+    - Total XP accumulation
+    - Achievement count
+    - Quest completion count
+    - Current streak
+
+[x] UI/UX
+    - Dark theme (travel/adventure aesthetic)
+    - Smooth animations (fade, slide effects)
+    - Bottom navigation with 5 tabs
+    - Responsive design
+    - Filter chips and search bars
+    - Tier-colored achievement cards
+
+
+PLANNED FEATURES (From Travel Trophies Web App)
+-----------------------------------------------
+
+[ ] Photo Documentation XP
+    - Upload photos as proof
+    - Bonus XP for documented achievements
+
+[ ] Master Achievements
+    - Meta-achievements for completing collections
+    - Special rewards
+
+[ ] Collection Bonuses
+    - Bonus XP for completing full collections
+    - Collection progress tracking
+
+[ ] Smart Collections
+    - AI-suggested achievements
+    - Personalized recommendations
+
+[ ] Admin Panel
+    - Achievement management
+    - User statistics
+
+[ ] Internationalization
+    - Hebrew language support
+    - RTL layout support
+    - English default
+
+[ ] Location-Based Features
+    - GPS verification for location achievements
+    - Nearby achievement discovery
+    - Map integration
+
+[ ] Social Features
+    - Friend system
+    - Leaderboards
+    - Achievement sharing
+
+[ ] Offline Support
+    - Local data persistence
+    - Sync when online
+
+
+================================================================================
+5. DATA MODELS
+================================================================================
+
+ACHIEVEMENT
+-----------
+- id: String
+- title: String
+- description: String
+- iconName: String?
+- tier: AchievementTier (bronze, silver, gold, platinum)
+- xpReward: int
+- latitude/longitude: double? (location)
+- claimRadius: double?
+- collectionId: String?
+- tags: List<String>
+- isUnlocked: bool
+- unlockedAt: DateTime?
+- visitDate: DateTime? (for retroactive)
+- photos: List<String>
+- notes: String?
+- isRetroactive: bool
+
+SIDE QUEST
+----------
+- id: String
+- title: String
+- description: String
+- category: String (18 categories)
+- skillType: String (links to skill)
+- difficulty: QuestDifficulty (easy, medium, hard, epic)
+- xpReward: int
+- verification: VerificationMethod
+- isRepeatable: bool
+- maxCompletions: int
+- completionCount: int
+- isCompleted: bool
+
+SKILL GROUP
+-----------
+- id: String
+- name: String
+- icon: String (emoji)
+- description: String
+- categories: List<String>
+- maxLevel: int (50)
+- xpPerLevel: int (varies)
+- gradientStart: String (hex color)
+- gradientEnd: String (hex color)
+
+USER PROFILE
+------------
+- id: String
+- displayName: String
+- level: int
+- xp: int
+- avatarUrl: String?
+
+
+================================================================================
+6. COLOR PALETTE
+================================================================================
+
+BACKGROUNDS
+-----------
+- bgPrimary:    #0a0a0f (Deep dark)
+- bgCard:       #13131a (Card background)
+- bgCardLight:  #1a1a24 (Elevated cards)
+
+TEXT
+----
+- textPrimary:   #ffffff
+- textSecondary: #a1a1aa
+- textMuted:     #71717a
+
+ACCENTS
+-------
+- primary:   #3b82f6 (Blue)
+- success:   #10b981 (Green)
+- warning:   #f59e0b (Orange)
+- error:     #ef4444 (Red)
+- info:      #06b6d4 (Cyan)
+
+ACHIEVEMENT TIERS
+-----------------
+- bronze:    #cd7f32
+- silver:    #c0c0c0
+- gold:      #ffd700
+- platinum:  #e5e4e2
+
+XP COLORS
+---------
+- xpGreen:   #22c55e
+- xpPurple:  #a855f7
+
+
+================================================================================
+7. GETTING STARTED
+================================================================================
+
+PREREQUISITES
+-------------
+- Flutter SDK 3.27.4+
+- Dart SDK 3.5.0+
+- Chrome browser (for web development)
+
+INSTALLATION
+------------
+1. Clone the repository
+2. Navigate to project directory:
+   > cd travel_buddy_flutter-main
+
+3. Get dependencies:
+   > flutter pub get
+
+4. Run the app:
+   > flutter run -d chrome
+
+BUILD
+-----
+Web:     > flutter build web
+Android: > flutter build apk
+iOS:     > flutter build ios
+
+
+================================================================================
+                              END OF DOCUMENTATION
+================================================================================
