@@ -8,6 +8,9 @@ import 'package:travel_buddy/features/map/presentation/screens/map_screen.dart';
 import 'package:travel_buddy/features/profile/presentation/screens/profile_screen.dart';
 import 'package:travel_buddy/features/leaderboard/presentation/screens/leaderboard_screen.dart';
 import 'package:travel_buddy/shared/widgets/app_shell.dart';
+import 'package:travel_buddy/features/profile/presentation/screens/edit_profile_screen.dart';
+import 'package:travel_buddy/features/profile/presentation/screens/privacy_settings_screen.dart';
+import 'package:travel_buddy/features/profile/presentation/screens/app_settings_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -20,6 +23,20 @@ final appRouter = GoRouter(
     GoRoute(
       path: '/auth',
       builder: (context, state) => const AuthScreen(),
+    ),
+
+    // Profile sub-routes (no bottom nav)
+    GoRoute(
+      path: '/profile/edit',
+      builder: (context, state) => const EditProfileScreen(),
+    ),
+    GoRoute(
+      path: '/profile/privacy',
+      builder: (context, state) => const PrivacySettingsScreen(),
+    ),
+    GoRoute(
+      path: '/profile/settings',
+      builder: (context, state) => const AppSettingsScreen(),
     ),
 
     // Main app with bottom navigation shell

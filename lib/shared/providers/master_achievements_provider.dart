@@ -5,6 +5,7 @@ import 'package:travel_buddy/shared/data/master_achievement_registry.dart';
 import 'package:travel_buddy/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy/shared/providers/quests_provider.dart';
 import 'package:travel_buddy/shared/providers/user_profile_provider.dart';
+import 'package:travel_buddy/shared/providers/persistence_provider.dart';
 
 class MasterAchievementsState {
   final List<MasterAchievement> allMasterAchievements;
@@ -48,11 +49,28 @@ class MasterAchievementsNotifier extends StateNotifier<MasterAchievementsState> 
   }
 
   void _loadMasterAchievements() {
-    final achievements = _calculateProgress(masterAchievementRegistry);
+    final persistence = ref.read(persistenceServiceProvider);
+    final savedIds = persistence.loadMasterAchievementIds();
+
+    // Mark previously unlocked masters
+    final withSaved = masterAchievementRegistry.map((m) {
+      if (savedIds.contains(m.id)) {
+        return m.copyWith(isUnlocked: true, progress: 1.0);
+      }
+      return m;
+    }).toList();
+
+    final achievements = _calculateProgress(withSaved);
     state = MasterAchievementsState(
       allMasterAchievements: achievements,
       unlockedMasterAchievements: achievements.where((m) => m.isUnlocked).toList(),
     );
+  }
+
+  void _persist() {
+    final persistence = ref.read(persistenceServiceProvider);
+    final unlockedIds = state.unlockedMasterAchievements.map((m) => m.id).toSet();
+    persistence.saveMasterAchievementIds(unlockedIds);
   }
 
   void _listenToChanges() {
@@ -83,6 +101,10 @@ class MasterAchievementsNotifier extends StateNotifier<MasterAchievementsState> 
     // Award XP for newly unlocked master achievements
     for (final master in newlyUnlocked) {
       ref.read(userProfileProvider.notifier).addXp(master.xpReward);
+    }
+
+    if (newlyUnlocked.isNotEmpty) {
+      _persist();
     }
   }
 

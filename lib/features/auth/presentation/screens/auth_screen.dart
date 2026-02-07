@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -32,6 +33,7 @@ class _AuthScreenState extends State<AuthScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Scaffold(
       body: SafeArea(
         child: SingleChildScrollView(
@@ -47,7 +49,7 @@ class _AuthScreenState extends State<AuthScreen> {
               ).animate().scale(duration: 600.ms, curve: Curves.elasticOut),
               const SizedBox(height: 24),
               Text(
-                'TravelBuddy',
+                l10n.travelBuddy,
                 textAlign: TextAlign.center,
                 style: Theme.of(context).textTheme.headlineLarge?.copyWith(
                       fontWeight: FontWeight.bold,
@@ -55,7 +57,7 @@ class _AuthScreenState extends State<AuthScreen> {
               ).animate().fadeIn(duration: 500.ms),
               const SizedBox(height: 8),
               Text(
-                'Your gamified travel companion',
+                l10n.gamifiedTravelCompanion,
                 textAlign: TextAlign.center,
                 style: TextStyle(color: AppColors.textSecondary),
               ).animate().fadeIn(duration: 600.ms),
@@ -70,12 +72,12 @@ class _AuthScreenState extends State<AuthScreen> {
                 child: Row(
                   children: [
                     _TabButton(
-                      label: 'Login',
+                      label: l10n.login,
                       isActive: _isLogin,
                       onTap: () => setState(() => _isLogin = true),
                     ),
                     _TabButton(
-                      label: 'Sign Up',
+                      label: l10n.signUp,
                       isActive: !_isLogin,
                       onTap: () => setState(() => _isLogin = false),
                     ),
@@ -88,7 +90,7 @@ class _AuthScreenState extends State<AuthScreen> {
               if (!_isLogin) ...[
                 _InputField(
                   controller: _nameController,
-                  label: 'Display Name',
+                  label: l10n.displayName,
                   icon: LucideIcons.user,
                 ),
                 const SizedBox(height: 16),
@@ -96,14 +98,14 @@ class _AuthScreenState extends State<AuthScreen> {
 
               _InputField(
                 controller: _emailController,
-                label: 'Email',
+                label: l10n.email,
                 icon: LucideIcons.mail,
                 keyboardType: TextInputType.emailAddress,
               ),
               const SizedBox(height: 16),
               _InputField(
                 controller: _passwordController,
-                label: 'Password',
+                label: l10n.password,
                 icon: LucideIcons.lock,
                 obscureText: true,
               ),
@@ -111,12 +113,12 @@ class _AuthScreenState extends State<AuthScreen> {
 
               ElevatedButton(
                 onPressed: _submit,
-                child: Text(_isLogin ? 'Login' : 'Create Account'),
+                child: Text(_isLogin ? l10n.login : l10n.createAccount),
               ),
               const SizedBox(height: 16),
               TextButton(
                 onPressed: _submit,
-                child: const Text('Continue as Guest'),
+                child: Text(l10n.continueAsGuest),
               ),
             ],
           ),

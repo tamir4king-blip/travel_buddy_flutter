@@ -1,25 +1,33 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:travel_buddy/shared/models/user_profile.dart';
 import 'package:travel_buddy/shared/providers/auth_provider.dart';
+import 'package:travel_buddy/shared/providers/persistence_provider.dart';
 
 class UserProfileNotifier extends StateNotifier<UserProfile> {
-  UserProfileNotifier(UserProfile initial) : super(initial);
+  final Ref ref;
+
+  UserProfileNotifier(this.ref, UserProfile initial) : super(initial) {
+    _loadFromPersistence();
+  }
+
+  void _loadFromPersistence() {
+    final persistence = ref.read(persistenceServiceProvider);
+    final saved = persistence.loadUserProfile();
+    if (saved != null) {
+      state = saved;
+    }
+  }
+
+  void _persist() {
+    final persistence = ref.read(persistenceServiceProvider);
+    persistence.saveUserProfile(state);
+  }
 
   void addXp(int amount) {
     final newXp = state.totalXp + amount;
     final newLevel = _calculateLevel(newXp);
-    state = UserProfile(
-      id: state.id,
-      displayName: state.displayName,
-      username: state.username,
-      bio: state.bio,
-      avatarUrl: state.avatarUrl,
-      totalXp: newXp,
-      level: newLevel,
-      isPremium: state.isPremium,
-      isPublic: state.isPublic,
-      createdAt: state.createdAt,
-    );
+    state = state.copyWith(totalXp: newXp, level: newLevel);
+    _persist();
   }
 
   void updateProfile({
@@ -29,23 +37,17 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
     String? avatarUrl,
     bool? isPublic,
   }) {
-    state = UserProfile(
-      id: state.id,
-      displayName: displayName ?? state.displayName,
-      username: username ?? state.username,
-      bio: bio ?? state.bio,
-      avatarUrl: avatarUrl ?? state.avatarUrl,
-      totalXp: state.totalXp,
-      level: state.level,
-      isPremium: state.isPremium,
-      isPublic: isPublic ?? state.isPublic,
-      createdAt: state.createdAt,
+    state = state.copyWith(
+      displayName: displayName,
+      username: username,
+      bio: bio,
+      avatarUrl: avatarUrl,
+      isPublic: isPublic,
     );
+    _persist();
   }
 
   static int _calculateLevel(int totalXp) {
-    // XP thresholds per level (matching React app's travelerLevel.ts)
-    // Each level requires progressively more XP
     if (totalXp < 100) return 1;
     if (totalXp < 250) return 2;
     if (totalXp < 500) return 3;
@@ -56,7 +58,6 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
     if (totalXp < 3300) return 8;
     if (totalXp < 4250) return 9;
     if (totalXp < 5400) return 10;
-    // Beyond level 10: every 1500 XP
     return 10 + ((totalXp - 5400) ~/ 1500);
   }
 
@@ -75,5 +76,5 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
 final userProfileProvider =
     StateNotifierProvider<UserProfileNotifier, UserProfile>((ref) {
   final authState = ref.watch(authProvider);
-  return UserProfileNotifier(authState.user ?? UserProfile.demo);
+  return UserProfileNotifier(ref, authState.user ?? UserProfile.demo);
 });

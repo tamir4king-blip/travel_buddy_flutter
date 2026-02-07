@@ -2,7 +2,9 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
+import 'package:travel_buddy/l10n/registry_l10n.dart';
 import 'package:travel_buddy/shared/models/master_achievement.dart';
 import 'package:travel_buddy/shared/providers/master_achievements_provider.dart';
 
@@ -11,6 +13,7 @@ class MasterAchievementsSection extends ConsumerWidget {
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(masterAchievementsProvider);
     final notifier = ref.read(masterAchievementsProvider.notifier);
     final filtered = state.filteredMasterAchievements;
@@ -44,16 +47,16 @@ class MasterAchievementsSection extends ConsumerWidget {
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Text(
-                    'Master Achievements',
-                    style: TextStyle(
+                  Text(
+                    l10n.masterAchievements,
+                    style: const TextStyle(
                       fontSize: 18,
                       fontWeight: FontWeight.bold,
                       color: AppColors.textPrimary,
                     ),
                   ),
                   Text(
-                    '${state.totalUnlocked} of ${state.totalMasterAchievements} mastered',
+                    l10n.masteredOfTotal(state.totalUnlocked, state.totalMasterAchievements),
                     style: const TextStyle(
                       fontSize: 13,
                       color: AppColors.textMuted,
@@ -74,14 +77,14 @@ class MasterAchievementsSection extends ConsumerWidget {
           child: Row(
             children: [
               _MasterTierChip(
-                label: 'All',
+                label: l10n.tierAll,
                 color: AppColors.primary,
                 isSelected: state.filterTier == null,
                 onTap: () => notifier.setTierFilter(null),
               ),
               const SizedBox(width: 8),
               _MasterTierChip(
-                label: 'Elite',
+                label: l10n.tierElite,
                 color: _tierColor(MasterTier.elite),
                 icon: '💎',
                 isSelected: state.filterTier == MasterTier.elite,
@@ -89,7 +92,7 @@ class MasterAchievementsSection extends ConsumerWidget {
               ),
               const SizedBox(width: 8),
               _MasterTierChip(
-                label: 'Legendary',
+                label: l10n.tierLegendary,
                 color: _tierColor(MasterTier.legendary),
                 icon: '🏅',
                 isSelected: state.filterTier == MasterTier.legendary,
@@ -97,7 +100,7 @@ class MasterAchievementsSection extends ConsumerWidget {
               ),
               const SizedBox(width: 8),
               _MasterTierChip(
-                label: 'Mythic',
+                label: l10n.tierMythic,
                 color: _tierColor(MasterTier.mythic),
                 icon: '👑',
                 isSelected: state.filterTier == MasterTier.mythic,
@@ -205,14 +208,15 @@ class _MasterAchievementCard extends StatelessWidget {
         MasterTier.mythic => const Color(0xFFA855F7),
       };
 
-  String get _tierLabel => switch (masterAchievement.tier) {
-        MasterTier.elite => 'ELITE',
-        MasterTier.legendary => 'LEGENDARY',
-        MasterTier.mythic => 'MYTHIC',
+  String _tierLabel(AppLocalizations l10n) => switch (masterAchievement.tier) {
+        MasterTier.elite => l10n.tierElite,
+        MasterTier.legendary => l10n.tierLegendary,
+        MasterTier.mythic => l10n.tierMythic,
       };
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Container(
       width: 160,
       padding: const EdgeInsets.all(14),
@@ -267,7 +271,7 @@ class _MasterAchievementCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(6),
                 ),
                 child: Text(
-                  _tierLabel,
+                  _tierLabel(l10n),
                   style: TextStyle(
                     color: _tierColor,
                     fontSize: 9,
@@ -283,7 +287,7 @@ class _MasterAchievementCard extends StatelessWidget {
 
           // Title
           Text(
-            masterAchievement.title,
+            RegistryL10n.masterTitle(Localizations.localeOf(context), masterAchievement.id, masterAchievement.title),
             style: TextStyle(
               fontWeight: FontWeight.w600,
               fontSize: 14,
@@ -299,7 +303,7 @@ class _MasterAchievementCard extends StatelessWidget {
 
           // Description
           Text(
-            masterAchievement.description,
+            RegistryL10n.masterDescription(Localizations.localeOf(context), masterAchievement.id, masterAchievement.description),
             style: const TextStyle(
               color: AppColors.textMuted,
               fontSize: 11,
@@ -324,7 +328,7 @@ class _MasterAchievementCard extends StatelessWidget {
             ),
             const SizedBox(height: 6),
             Text(
-              '${(masterAchievement.progress * 100).round()}% complete',
+              l10n.percentComplete((masterAchievement.progress * 100).round()),
               style: TextStyle(
                 color: _tierColor,
                 fontSize: 11,

@@ -1,9 +1,13 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
+import 'package:intl/intl.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
+import 'package:travel_buddy/l10n/registry_l10n.dart';
 import 'package:travel_buddy/shared/models/achievement.dart';
 import 'package:travel_buddy/shared/providers/achievements_provider.dart';
+import 'package:travel_buddy/shared/widgets/photo_picker_widget.dart';
 
 class RetroactiveClaimModal extends StatefulWidget {
   final Achievement achievement;
@@ -92,16 +96,14 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
     Navigator.of(context).pop(null); // null means claim without retroactive data
   }
 
-  String _formatDate(DateTime date) {
-    final months = [
-      'Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun',
-      'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'
-    ];
-    return '${months[date.month - 1]} ${date.day}, ${date.year}';
+  String _formatDate(BuildContext context, DateTime date) {
+    final locale = Localizations.localeOf(context);
+    return DateFormat.yMMMd(locale.languageCode).format(date);
   }
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final bottomPadding = MediaQuery.of(context).viewInsets.bottom;
 
     return Container(
@@ -152,7 +154,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.achievement.title,
+                          RegistryL10n.achievementTitle(Localizations.localeOf(context), widget.achievement.id, widget.achievement.title),
                           style: const TextStyle(
                             fontSize: 18,
                             fontWeight: FontWeight.bold,
@@ -161,7 +163,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
                         ),
                         const SizedBox(height: 4),
                         Text(
-                          widget.achievement.description,
+                          RegistryL10n.achievementDescription(Localizations.localeOf(context), widget.achievement.id, widget.achievement.description),
                           style: const TextStyle(
                             fontSize: 14,
                             color: AppColors.textSecondary,
@@ -181,7 +183,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
                 child: ElevatedButton.icon(
                   onPressed: _handleQuickClaim,
                   icon: const Icon(LucideIcons.zap, size: 18),
-                  label: Text('Claim Now (+${widget.achievement.xpReward} XP)'),
+                  label: Text(l10n.claimNowXp(widget.achievement.xpReward)),
                   style: ElevatedButton.styleFrom(
                     backgroundColor: _tierColor,
                     foregroundColor: Colors.white,
@@ -202,7 +204,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
                   Padding(
                     padding: const EdgeInsets.symmetric(horizontal: 16),
                     child: Text(
-                      'or claim retroactively',
+                      l10n.orClaimRetroactively,
                       style: TextStyle(
                         color: AppColors.textMuted,
                         fontSize: 12,
@@ -217,7 +219,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
 
               // Date picker
               Text(
-                'When did you accomplish this?',
+                l10n.whenDidYouAccomplish,
                 style: TextStyle(
                   color: AppColors.textSecondary,
                   fontWeight: FontWeight.w500,
@@ -244,7 +246,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
                       ),
                       const SizedBox(width: 12),
                       Text(
-                        _formatDate(_selectedDate),
+                        _formatDate(context, _selectedDate),
                         style: TextStyle(
                           color: _isRetroactive
                               ? AppColors.textPrimary
@@ -267,7 +269,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
 
               // Notes field
               Text(
-                'Notes (optional)',
+                l10n.notesOptional,
                 style: TextStyle(
                   color: AppColors.textSecondary,
                   fontWeight: FontWeight.w500,
@@ -278,7 +280,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
                 controller: _notesController,
                 maxLines: 3,
                 decoration: InputDecoration(
-                  hintText: 'Add details about your experience...',
+                  hintText: l10n.addDetailsAboutExperience,
                   hintStyle: const TextStyle(color: AppColors.textMuted),
                   filled: true,
                   fillColor: AppColors.bgCardLight,
@@ -293,53 +295,24 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
 
               const SizedBox(height: 16),
 
-              // Photo placeholder (would integrate with image_picker)
+              // Photos
               Text(
-                'Photos (optional)',
+                l10n.photosOptional,
                 style: TextStyle(
                   color: AppColors.textSecondary,
                   fontWeight: FontWeight.w500,
                 ),
               ),
               const SizedBox(height: 8),
-              GestureDetector(
-                onTap: () {
-                  // TODO: Integrate with image_picker package
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(
-                      content: Text('Photo upload coming soon!'),
-                      backgroundColor: AppColors.bgCardLight,
-                    ),
-                  );
+              PhotoPickerWidget(
+                photos: _photos,
+                onPhotosChanged: (updated) {
+                  setState(() {
+                    _photos.clear();
+                    _photos.addAll(updated);
+                  });
                 },
-                child: Container(
-                  height: 80,
-                  decoration: BoxDecoration(
-                    color: AppColors.bgCardLight,
-                    borderRadius: BorderRadius.circular(12),
-                    border: Border.all(
-                      color: AppColors.textMuted.withValues(alpha: 0.3),
-                      style: BorderStyle.solid,
-                    ),
-                  ),
-                  child: Row(
-                    mainAxisAlignment: MainAxisAlignment.center,
-                    children: [
-                      Icon(
-                        LucideIcons.camera,
-                        color: AppColors.textMuted,
-                        size: 24,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        'Add photos',
-                        style: TextStyle(
-                          color: AppColors.textMuted,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
+                maxPhotos: 5,
               ).animate(delay: 300.ms).fadeIn(duration: 300.ms).slideY(begin: 0.1),
 
               const SizedBox(height: 20),
@@ -365,7 +338,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          'Retroactive claims earn 80% XP (+${(widget.achievement.xpReward * 0.8).round()} XP)',
+                          l10n.retroactiveXpNotice((widget.achievement.xpReward * 0.8).round()),
                           style: TextStyle(
                             color: AppColors.warning,
                             fontSize: 13,
@@ -384,7 +357,7 @@ class _RetroactiveClaimModalState extends State<RetroactiveClaimModal> {
                 child: OutlinedButton.icon(
                   onPressed: _isRetroactive ? _handleClaim : null,
                   icon: const Icon(LucideIcons.clock, size: 18),
-                  label: const Text('Claim Retroactively'),
+                  label: Text(l10n.claimRetroactively),
                   style: OutlinedButton.styleFrom(
                     foregroundColor: _tierColor,
                     side: BorderSide(

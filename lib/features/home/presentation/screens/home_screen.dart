@@ -3,138 +3,151 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
 import 'package:travel_buddy/shared/models/user_profile.dart';
 import 'package:travel_buddy/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy/shared/providers/quests_provider.dart';
 import 'package:travel_buddy/shared/providers/user_profile_provider.dart';
+import 'package:travel_buddy/shared/widgets/directional_icon.dart';
 import 'package:travel_buddy/shared/widgets/xp_progress_bar.dart';
+import 'package:travel_buddy/shared/widgets/responsive_layout.dart';
 
 class HomeScreen extends ConsumerWidget {
   const HomeScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context)!;
     final user = ref.watch(userProfileProvider);
     final achievements = ref.watch(achievementsProvider);
     final quests = ref.watch(questsProvider);
 
+    final gridCols = ResponsiveLayout.gridColumns(context, mobile: 2, tablet: 3, desktop: 4);
+    final isComplete = achievements.completedCollections;
+
     return SafeArea(
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
+      child: ResponsiveLayout(
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.welcomeBack,
+                      style: Theme.of(context).textTheme.bodyLarge?.copyWith(
+                            color: AppColors.textSecondary,
+                          ),
+                    ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.1),
+                    const SizedBox(height: 4),
+                    Text(
+                      user.displayName,
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ).animate().fadeIn(duration: 500.ms).slideX(begin: -0.1),
+                    const SizedBox(height: 20),
+
+                    _XpCard(user: user),
+                    const SizedBox(height: 24),
+
+                    _QuickStatsRow(
+                      achievementCount: achievements.totalUnlocked,
+                      questCount: quests.completedCount,
+                      streak: quests.currentStreak,
+                    ),
+                    const SizedBox(height: 24),
+
+                    Text(
+                      l10n.nearbyAdventures,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                    _AdventureCard(
+                      title: l10n.exploreYourCity,
+                      subtitle: l10n.achievementsToUnlock(achievements.totalAchievements - achievements.totalUnlocked),
+                      icon: LucideIcons.mapPin,
+                      color: AppColors.primary,
+                      onTap: () => context.go('/map'),
+                    ),
+                    const SizedBox(height: 12),
+                    _AdventureCard(
+                      title: l10n.dailyQuestAvailable,
+                      subtitle: l10n.takePhotoAtLandmark,
+                      icon: LucideIcons.camera,
+                      color: AppColors.xpGreen,
+                      onTap: () => context.go('/quests'),
+                    ),
+                    const SizedBox(height: 24),
+
+                    Text(
+                      l10n.yourCollections,
+                      style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 12),
+                  ],
+                ),
+              ),
+            ),
+
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverGrid.count(
+                crossAxisCount: gridCols,
+                crossAxisSpacing: 12,
+                mainAxisSpacing: 12,
+                childAspectRatio: 1.1,
                 children: [
-                  Text(
-                    'Welcome back,',
-                    style: Theme.of(context).textTheme.bodyLarge?.copyWith(
-                          color: AppColors.textSecondary,
-                        ),
-                  ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.1),
-                  const SizedBox(height: 4),
-                  Text(
-                    user.displayName,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ).animate().fadeIn(duration: 500.ms).slideX(begin: -0.1),
-                  const SizedBox(height: 20),
-
-                  _XpCard(user: user),
-                  const SizedBox(height: 24),
-
-                  _QuickStatsRow(
-                    achievementCount: achievements.totalUnlocked,
-                    questCount: quests.completedCount,
-                    streak: quests.currentStreak,
-                  ),
-                  const SizedBox(height: 24),
-
-                  Text(
-                    'Nearby Adventures',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  _AdventureCard(
-                    title: 'Explore your city',
-                    subtitle: '${achievements.totalAchievements - achievements.totalUnlocked} achievements to unlock',
-                    icon: LucideIcons.mapPin,
+                  _CollectionCard(
+                    title: l10n.collectionCities,
+                    progress: _countByCollection(achievements, 'cities'),
+                    total: _totalByCollection(achievements, 'cities'),
+                    icon: LucideIcons.building2,
                     color: AppColors.primary,
-                    onTap: () => context.go('/map'),
+                    isComplete: isComplete.contains('cities'),
+                    onTap: () => context.go('/achievements'),
                   ),
-                  const SizedBox(height: 12),
-                  _AdventureCard(
-                    title: 'Daily Quest Available',
-                    subtitle: 'Take a photo at a landmark',
-                    icon: LucideIcons.camera,
+                  _CollectionCard(
+                    title: l10n.collectionNature,
+                    progress: _countByCollection(achievements, 'nature'),
+                    total: _totalByCollection(achievements, 'nature'),
+                    icon: LucideIcons.trees,
                     color: AppColors.xpGreen,
-                    onTap: () => context.go('/quests'),
+                    isComplete: isComplete.contains('nature'),
+                    onTap: () => context.go('/achievements'),
                   ),
-                  const SizedBox(height: 24),
-
-                  Text(
-                    'Your Collections',
-                    style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                          fontWeight: FontWeight.bold,
-                        ),
+                  _CollectionCard(
+                    title: l10n.collectionFoodDrink,
+                    progress: _countByCollection(achievements, 'food-drink'),
+                    total: _totalByCollection(achievements, 'food-drink'),
+                    icon: LucideIcons.utensils,
+                    color: AppColors.warning,
+                    isComplete: isComplete.contains('food-drink'),
+                    onTap: () => context.go('/achievements'),
                   ),
-                  const SizedBox(height: 12),
+                  _CollectionCard(
+                    title: l10n.collectionCulture,
+                    progress: _countByCollection(achievements, 'culture'),
+                    total: _totalByCollection(achievements, 'culture'),
+                    icon: LucideIcons.landmark,
+                    color: AppColors.error,
+                    isComplete: isComplete.contains('culture'),
+                    onTap: () => context.go('/achievements'),
+                  ),
                 ],
               ),
             ),
-          ),
 
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            sliver: SliverGrid.count(
-              crossAxisCount: 2,
-              crossAxisSpacing: 12,
-              mainAxisSpacing: 12,
-              childAspectRatio: 1.1,
-              children: [
-                _CollectionCard(
-                  title: 'Cities',
-                  progress: _countByCollection(achievements, 'cities'),
-                  total: _totalByCollection(achievements, 'cities'),
-                  icon: LucideIcons.building2,
-                  color: AppColors.primary,
-                  onTap: () => context.go('/achievements'),
-                ),
-                _CollectionCard(
-                  title: 'Nature',
-                  progress: _countByCollection(achievements, 'nature'),
-                  total: _totalByCollection(achievements, 'nature'),
-                  icon: LucideIcons.trees,
-                  color: AppColors.xpGreen,
-                  onTap: () => context.go('/achievements'),
-                ),
-                _CollectionCard(
-                  title: 'Food & Drink',
-                  progress: _countByCollection(achievements, 'food-drink'),
-                  total: _totalByCollection(achievements, 'food-drink'),
-                  icon: LucideIcons.utensils,
-                  color: AppColors.warning,
-                  onTap: () => context.go('/achievements'),
-                ),
-                _CollectionCard(
-                  title: 'Culture',
-                  progress: _countByCollection(achievements, 'culture'),
-                  total: _totalByCollection(achievements, 'culture'),
-                  icon: LucideIcons.landmark,
-                  color: AppColors.error,
-                  onTap: () => context.go('/achievements'),
-                ),
-              ],
-            ),
-          ),
-
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
-        ],
+            const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          ],
+        ),
       ),
     );
   }
@@ -160,6 +173,7 @@ class _XpCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final xpInLevel = user.totalXp % 200;
     final xpNeeded = 200 - xpInLevel;
 
@@ -180,7 +194,7 @@ class _XpCard extends StatelessWidget {
             mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
-                'Level ${user.level}',
+                l10n.levelN(user.level),
                 style: Theme.of(context).textTheme.titleMedium?.copyWith(
                       color: Colors.white.withValues(alpha: 0.9),
                       fontWeight: FontWeight.w600,
@@ -193,7 +207,7 @@ class _XpCard extends StatelessWidget {
                   borderRadius: BorderRadius.circular(20),
                 ),
                 child: Text(
-                  '${user.totalXp} XP',
+                  l10n.xpAmount(user.totalXp),
                   style: const TextStyle(
                     color: Colors.white,
                     fontWeight: FontWeight.bold,
@@ -206,7 +220,7 @@ class _XpCard extends StatelessWidget {
           XpProgressBar(current: xpInLevel, max: 200),
           const SizedBox(height: 8),
           Text(
-            '$xpNeeded XP to next level',
+            l10n.xpToNextLevel(xpNeeded),
             style: TextStyle(
               color: Colors.white.withValues(alpha: 0.7),
               fontSize: 12,
@@ -231,24 +245,25 @@ class _QuickStatsRow extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return Row(
       children: [
         Expanded(
-          child: _StatChip(label: 'Achievements', value: '$achievementCount', icon: LucideIcons.award)
+          child: _StatChip(label: l10n.achievements, value: '$achievementCount', icon: LucideIcons.award)
               .animate()
               .fadeIn(duration: 400.ms)
               .slideY(begin: 0.2),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: _StatChip(label: 'Quests', value: '$questCount', icon: LucideIcons.compass)
+          child: _StatChip(label: l10n.quests, value: '$questCount', icon: LucideIcons.compass)
               .animate(delay: 100.ms)
               .fadeIn(duration: 400.ms)
               .slideY(begin: 0.2),
         ),
         const SizedBox(width: 12),
         Expanded(
-          child: _StatChip(label: 'Streak', value: '${streak}d', icon: LucideIcons.flame)
+          child: _StatChip(label: l10n.streak, value: l10n.streakDays(streak), icon: LucideIcons.flame)
               .animate(delay: 200.ms)
               .fadeIn(duration: 400.ms)
               .slideY(begin: 0.2),
@@ -346,7 +361,7 @@ class _AdventureCard extends StatelessWidget {
                 ],
               ),
             ),
-            Icon(LucideIcons.chevronRight, color: AppColors.textMuted, size: 20),
+            DirectionalChevron(color: AppColors.textMuted, size: 20),
           ],
         ),
       ),
@@ -360,6 +375,7 @@ class _CollectionCard extends StatelessWidget {
   final int total;
   final IconData icon;
   final Color color;
+  final bool isComplete;
   final VoidCallback? onTap;
 
   const _CollectionCard({
@@ -368,11 +384,13 @@ class _CollectionCard extends StatelessWidget {
     required this.total,
     required this.icon,
     required this.color,
+    this.isComplete = false,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     return GestureDetector(
       onTap: onTap,
       child: Container(
@@ -380,18 +398,43 @@ class _CollectionCard extends StatelessWidget {
         decoration: BoxDecoration(
           color: AppColors.bgCard,
           borderRadius: BorderRadius.circular(16),
+          border: isComplete
+              ? Border.all(color: color.withValues(alpha: 0.5), width: 1.5)
+              : null,
         ),
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisAlignment: MainAxisAlignment.spaceBetween,
           children: [
-            Container(
-              padding: const EdgeInsets.all(10),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.15),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Icon(icon, color: color, size: 24),
+            Row(
+              mainAxisAlignment: MainAxisAlignment.spaceBetween,
+              children: [
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: color.withValues(alpha: 0.15),
+                    borderRadius: BorderRadius.circular(12),
+                  ),
+                  child: Icon(icon, color: color, size: 24),
+                ),
+                if (isComplete)
+                  Container(
+                    padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: color.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      l10n.complete,
+                      style: TextStyle(
+                        color: color,
+                        fontSize: 9,
+                        fontWeight: FontWeight.bold,
+                        letterSpacing: 0.5,
+                      ),
+                    ),
+                  ),
+              ],
             ),
             Column(
               crossAxisAlignment: CrossAxisAlignment.start,

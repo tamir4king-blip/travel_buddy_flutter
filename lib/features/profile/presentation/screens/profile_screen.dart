@@ -3,25 +3,30 @@ import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
 import 'package:travel_buddy/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy/shared/providers/auth_provider.dart';
 import 'package:travel_buddy/shared/providers/quests_provider.dart';
 import 'package:travel_buddy/shared/providers/user_profile_provider.dart';
+import 'package:travel_buddy/shared/providers/persistence_provider.dart';
+import 'package:travel_buddy/shared/widgets/responsive_layout.dart';
 
 class ProfileScreen extends ConsumerWidget {
   const ProfileScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context)!;
     final user = ref.watch(userProfileProvider);
     final achievements = ref.watch(achievementsProvider);
     final quests = ref.watch(questsProvider);
 
     return SafeArea(
-      child: SingleChildScrollView(
-        padding: const EdgeInsets.all(20),
-        child: Column(
+      child: ResponsiveLayout(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(20),
+          child: Column(
           children: [
             const SizedBox(height: 20),
             CircleAvatar(
@@ -55,43 +60,44 @@ class ProfileScreen extends ConsumerWidget {
 
             Row(
               children: [
-                _ProfileStat(label: 'Total XP', value: '${user.totalXp}'),
-                _ProfileStat(label: 'Level', value: '${user.level}'),
-                _ProfileStat(label: 'Trophies', value: '${achievements.totalUnlocked}'),
-                _ProfileStat(label: 'Quests', value: '${quests.completedCount}'),
+                _ProfileStat(label: l10n.totalXp, value: '${user.totalXp}'),
+                _ProfileStat(label: l10n.level, value: '${user.level}'),
+                _ProfileStat(label: l10n.trophies, value: '${achievements.totalUnlocked}'),
+                _ProfileStat(label: l10n.quests, value: '${quests.completedCount}'),
               ],
             ).animate().fadeIn(duration: 500.ms),
 
             const SizedBox(height: 32),
 
             _SettingsSection(
-              title: 'Account',
+              title: l10n.account,
               items: [
-                _SettingsTile(icon: LucideIcons.userCircle, label: 'Edit Profile', onTap: () {}),
-                _SettingsTile(icon: LucideIcons.shield, label: 'Privacy Settings', onTap: () {}),
-                _SettingsTile(icon: LucideIcons.bell, label: 'Notifications', onTap: () {}),
+                _SettingsTile(icon: LucideIcons.userCircle, label: l10n.editProfile, onTap: () => context.push('/profile/edit')),
+                _SettingsTile(icon: LucideIcons.shield, label: l10n.privacySettings, onTap: () => context.push('/profile/privacy')),
+                _SettingsTile(icon: LucideIcons.bell, label: l10n.notifications, onTap: () {}),
               ],
             ),
             const SizedBox(height: 20),
             _SettingsSection(
-              title: 'Preferences',
+              title: l10n.preferences,
               items: [
-                _SettingsTile(icon: LucideIcons.languages, label: 'Language', onTap: () {}),
-                _SettingsTile(icon: LucideIcons.palette, label: 'Theme', onTap: () {}),
-                _SettingsTile(icon: LucideIcons.mapPin, label: 'Location Settings', onTap: () {}),
+                _SettingsTile(icon: LucideIcons.languages, label: l10n.language, onTap: () => context.push('/profile/settings')),
+                _SettingsTile(icon: LucideIcons.palette, label: l10n.theme, onTap: () => context.push('/profile/settings')),
+                _SettingsTile(icon: LucideIcons.mapPin, label: l10n.locationSettings, onTap: () => context.push('/profile/settings')),
               ],
             ),
             const SizedBox(height: 20),
             _SettingsSection(
-              title: 'Support',
+              title: l10n.support,
               items: [
-                _SettingsTile(icon: LucideIcons.helpCircle, label: 'Help & FAQ', onTap: () {}),
-                _SettingsTile(icon: LucideIcons.messageSquare, label: 'Feedback', onTap: () {}),
+                _SettingsTile(icon: LucideIcons.helpCircle, label: l10n.helpAndFaq, onTap: () {}),
+                _SettingsTile(icon: LucideIcons.messageSquare, label: l10n.feedback, onTap: () {}),
                 _SettingsTile(
                   icon: LucideIcons.logOut,
-                  label: 'Log Out',
+                  label: l10n.logOut,
                   isDestructive: true,
                   onTap: () {
+                    ref.read(persistenceServiceProvider).clearAll();
                     ref.read(authProvider.notifier).signOut();
                     context.go('/auth');
                   },
@@ -100,6 +106,7 @@ class ProfileScreen extends ConsumerWidget {
             ),
             const SizedBox(height: 100),
           ],
+        ),
         ),
       ),
     );
@@ -149,7 +156,7 @@ class _SettingsSection extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Padding(
-          padding: const EdgeInsets.only(left: 4, bottom: 8),
+          padding: const EdgeInsetsDirectional.only(start: 4, bottom: 8),
           child: Text(
             title,
             style: const TextStyle(color: AppColors.textMuted, fontWeight: FontWeight.w600, fontSize: 13),
@@ -183,10 +190,15 @@ class _SettingsTile extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final color = isDestructive ? AppColors.error : AppColors.textPrimary;
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
     return ListTile(
       leading: Icon(icon, size: 20, color: color),
       title: Text(label, style: TextStyle(color: color, fontSize: 15)),
-      trailing: Icon(LucideIcons.chevronRight, size: 18, color: AppColors.textMuted),
+      trailing: Icon(
+        isRtl ? LucideIcons.chevronLeft : LucideIcons.chevronRight,
+        size: 18,
+        color: AppColors.textMuted,
+      ),
       onTap: onTap,
       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
     );

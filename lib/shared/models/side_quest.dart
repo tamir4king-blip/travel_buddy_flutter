@@ -30,4 +30,24 @@ class SideQuest {
     this.completionCount = 0,
     this.isCompleted = false,
   });
+
+  SideQuest copyWith({
+    int? completionCount,
+    bool? isCompleted,
+  }) {
+    return SideQuest(
+      id: id,
+      title: title,
+      description: description,
+      category: category,
+      skillType: skillType,
+      difficulty: difficulty,
+      xpReward: xpReward,
+      verification: verification,
+      isRepeatable: isRepeatable,
+      maxCompletions: maxCompletions,
+      completionCount: completionCount ?? this.completionCount,
+      isCompleted: isCompleted ?? this.isCompleted,
+    );
+  }
 }

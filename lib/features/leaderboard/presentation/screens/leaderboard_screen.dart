@@ -2,14 +2,17 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
 import 'package:travel_buddy/shared/providers/leaderboard_provider.dart';
+import 'package:travel_buddy/shared/widgets/responsive_layout.dart';
 
 class LeaderboardScreen extends ConsumerWidget {
   const LeaderboardScreen({super.key});
 
   @override
   Widget build(BuildContext context, WidgetRef ref) {
+    final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(leaderboardProvider);
     final notifier = ref.read(leaderboardProvider.notifier);
 
@@ -17,23 +20,24 @@ class LeaderboardScreen extends ConsumerWidget {
     final rest = state.entries.where((e) => e.rank > 3).toList();
 
     return SafeArea(
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
+      child: ResponsiveLayout(
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Text(
-                    'Leaderboard',
+                    l10n.leaderboard,
                     style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                           fontWeight: FontWeight.bold,
                         ),
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${state.totalParticipants} participants',
+                    l10n.participants(state.totalParticipants),
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 16),
@@ -41,19 +45,19 @@ class LeaderboardScreen extends ConsumerWidget {
                   Row(
                     children: [
                       _TimeChip(
-                        label: 'Weekly',
+                        label: l10n.weekly,
                         isSelected: state.timeRange == TimeRange.weekly,
                         onTap: () => notifier.setTimeRange(TimeRange.weekly),
                       ),
                       const SizedBox(width: 8),
                       _TimeChip(
-                        label: 'Monthly',
+                        label: l10n.monthly,
                         isSelected: state.timeRange == TimeRange.monthly,
                         onTap: () => notifier.setTimeRange(TimeRange.monthly),
                       ),
                       const SizedBox(width: 8),
                       _TimeChip(
-                        label: 'All Time',
+                        label: l10n.allTime,
                         isSelected: state.timeRange == TimeRange.allTime,
                         onTap: () => notifier.setTimeRange(TimeRange.allTime),
                       ),
@@ -83,6 +87,7 @@ class LeaderboardScreen extends ConsumerWidget {
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
+      ),
       ),
     );
   }

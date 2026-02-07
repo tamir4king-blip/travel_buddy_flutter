@@ -2,11 +2,14 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
+import 'package:travel_buddy/l10n/registry_l10n.dart';
 import 'package:travel_buddy/shared/models/side_quest.dart';
 import 'package:travel_buddy/shared/models/skill_group.dart';
 import 'package:travel_buddy/shared/providers/quests_provider.dart';
 import 'package:travel_buddy/shared/providers/skills_provider.dart';
+import 'package:travel_buddy/shared/widgets/responsive_layout.dart';
 
 class QuestsScreen extends ConsumerStatefulWidget {
   const QuestsScreen({super.key});
@@ -20,6 +23,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(questsProvider);
     final notifier = ref.read(questsProvider.notifier);
     final skillsState = ref.watch(skillsProvider);
@@ -37,18 +41,19 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
     }).toList();
 
     return SafeArea(
-      child: CustomScrollView(
-        slivers: [
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.all(20),
+      child: ResponsiveLayout(
+        child: CustomScrollView(
+          slivers: [
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.all(20),
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
                   Row(
                     children: [
                       Text(
-                        'Side Quests',
+                        l10n.sideQuests,
                         style: Theme.of(context).textTheme.headlineMedium?.copyWith(
                               fontWeight: FontWeight.bold,
                             ),
@@ -58,19 +63,19 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                         TextButton.icon(
                           onPressed: () => setState(() => _activeSkillId = null),
                           icon: const Icon(LucideIcons.x, size: 16),
-                          label: const Text('Clear'),
+                          label: Text(l10n.clear),
                         ),
                     ],
                   ),
                   const SizedBox(height: 4),
                   Text(
-                    '${state.completedCount} completed  •  ${state.currentStreak} day streak',
+                    '${l10n.completedCount(state.completedCount)}  •  ${l10n.dayStreak(state.currentStreak)}',
                     style: TextStyle(color: AppColors.textSecondary),
                   ),
                   const SizedBox(height: 20),
 
                   Text(
-                    'Skills',
+                    l10n.skills,
                     style: Theme.of(context).textTheme.titleMedium?.copyWith(
                           fontWeight: FontWeight.w700,
                         ),
@@ -105,47 +110,47 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
                     child: Row(
                       children: [
                         _CategoryChip(
-                          label: 'All', icon: LucideIcons.layoutGrid,
+                          label: l10n.categoryAll, icon: LucideIcons.layoutGrid,
                           isSelected: state.filterCategory == null,
                           onTap: () => notifier.setCategoryFilter(null),
                         ),
                         _CategoryChip(
-                          label: 'Hiking', icon: LucideIcons.mountain,
+                          label: l10n.categoryHiking, icon: LucideIcons.mountain,
                           isSelected: state.filterCategory == 'hiking',
                           onTap: () => notifier.setCategoryFilter('hiking'),
                         ),
                         _CategoryChip(
-                          label: 'Food', icon: LucideIcons.utensils,
+                          label: l10n.categoryFood, icon: LucideIcons.utensils,
                           isSelected: state.filterCategory == 'cooking',
                           onTap: () => notifier.setCategoryFilter('cooking'),
                         ),
                         _CategoryChip(
-                          label: 'Photo', icon: LucideIcons.camera,
+                          label: l10n.categoryPhoto, icon: LucideIcons.camera,
                           isSelected: state.filterCategory == 'photography',
                           onTap: () => notifier.setCategoryFilter('photography'),
                         ),
                         _CategoryChip(
-                          label: 'Culture', icon: LucideIcons.landmark,
+                          label: l10n.categoryCulture, icon: LucideIcons.landmark,
                           isSelected: state.filterCategory == 'culture',
                           onTap: () => notifier.setCategoryFilter('culture'),
                         ),
                         _CategoryChip(
-                          label: 'Water', icon: LucideIcons.waves,
+                          label: l10n.categoryWater, icon: LucideIcons.waves,
                           isSelected: state.filterCategory == 'water_sports',
                           onTap: () => notifier.setCategoryFilter('water_sports'),
                         ),
                         _CategoryChip(
-                          label: 'Fishing', icon: LucideIcons.fish,
+                          label: l10n.categoryFishing, icon: LucideIcons.fish,
                           isSelected: state.filterCategory == 'fishing',
                           onTap: () => notifier.setCategoryFilter('fishing'),
                         ),
                         _CategoryChip(
-                          label: 'Camping', icon: LucideIcons.tent,
+                          label: l10n.categoryCamping, icon: LucideIcons.tent,
                           isSelected: state.filterCategory == 'camping',
                           onTap: () => notifier.setCategoryFilter('camping'),
                         ),
                         _CategoryChip(
-                          label: 'Extreme', icon: LucideIcons.zap,
+                          label: l10n.categoryExtreme, icon: LucideIcons.zap,
                           isSelected: state.filterCategory == 'extreme_sports',
                           onTap: () => notifier.setCategoryFilter('extreme_sports'),
                         ),
@@ -177,6 +182,7 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
           ),
           const SliverToBoxAdapter(child: SizedBox(height: 100)),
         ],
+      ),
       ),
     );
   }
@@ -229,7 +235,7 @@ class _CategoryChip extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Padding(
-      padding: const EdgeInsets.only(right: 8),
+      padding: const EdgeInsetsDirectional.only(end: 8),
       child: FilterChip(
         label: Row(
           mainAxisSize: MainAxisSize.min,
@@ -265,11 +271,11 @@ class _QuestCard extends StatelessWidget {
         QuestDifficulty.legendary => AppColors.platinum,
       };
 
-  String get _difficultyLabel => switch (quest.difficulty) {
-        QuestDifficulty.easy => 'Easy',
-        QuestDifficulty.medium => 'Medium',
-        QuestDifficulty.hard => 'Hard',
-        QuestDifficulty.legendary => 'Legendary',
+  String _difficultyLabel(AppLocalizations l10n) => switch (quest.difficulty) {
+        QuestDifficulty.easy => l10n.difficultyEasy,
+        QuestDifficulty.medium => l10n.difficultyMedium,
+        QuestDifficulty.hard => l10n.difficultyHard,
+        QuestDifficulty.legendary => l10n.difficultyLegendary,
       };
 
   IconData get _categoryIcon => switch (quest.category) {
@@ -286,8 +292,11 @@ class _QuestCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+    final locale = Localizations.localeOf(context);
     final canComplete = !quest.isCompleted ||
         (quest.isRepeatable && quest.completionCount < quest.maxCompletions);
+    final isRtl = Directionality.of(context) == TextDirection.rtl;
 
     return GestureDetector(
       onTap: onDetails,
@@ -316,12 +325,12 @@ class _QuestCard extends StatelessWidget {
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
-                        quest.title,
+                        RegistryL10n.questTitle(locale, quest.id, quest.title),
                         style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
                       ),
                       const SizedBox(height: 2),
                       Text(
-                        quest.description,
+                        RegistryL10n.questDescription(locale, quest.id, quest.description),
                         style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                         maxLines: 2,
                         overflow: TextOverflow.ellipsis,
@@ -329,7 +338,11 @@ class _QuestCard extends StatelessWidget {
                     ],
                   ),
                 ),
-                const Icon(LucideIcons.chevronRight, size: 18, color: AppColors.textMuted),
+                Icon(
+                  isRtl ? LucideIcons.chevronLeft : LucideIcons.chevronRight,
+                  size: 18,
+                  color: AppColors.textMuted,
+                ),
               ],
             ),
             const SizedBox(height: 12),
@@ -342,7 +355,7 @@ class _QuestCard extends StatelessWidget {
                     borderRadius: BorderRadius.circular(6),
                   ),
                   child: Text(
-                    _difficultyLabel,
+                    _difficultyLabel(l10n),
                     style: TextStyle(
                       color: _difficultyColor,
                       fontSize: 11,
@@ -392,7 +405,7 @@ class _QuestCard extends StatelessWidget {
                         borderRadius: BorderRadius.circular(8),
                       ),
                       child: Text(
-                        quest.isCompleted ? 'Repeat' : 'Start',
+                        quest.isCompleted ? l10n.repeat : l10n.start,
                         style: TextStyle(
                           color: canComplete ? Colors.white : AppColors.textMuted,
                           fontSize: 12,
@@ -427,6 +440,7 @@ class _SkillCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final gradient = LinearGradient(
       colors: [
         _parseColor(skill.gradientStart),
@@ -458,11 +472,11 @@ class _SkillCard extends StatelessWidget {
             Text(skill.icon, style: const TextStyle(fontSize: 20)),
             const SizedBox(height: 6),
             Text(
-              skill.name,
+              RegistryL10n.skillName(Localizations.localeOf(context), skill.id, skill.name),
               style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
             ),
             Text(
-              'Lv $level',
+              l10n.lvN(level),
               style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12),
             ),
             const Spacer(),
@@ -496,11 +510,11 @@ class _QuestDetailSheet extends StatelessWidget {
     required this.onComplete,
   });
 
-  String get _verificationLabel => switch (quest.verification) {
-        VerificationMethod.photo => 'Photo proof',
-        VerificationMethod.location => 'Location check',
-        VerificationMethod.timeBased => 'Time based',
-        VerificationMethod.manual => 'Manual',
+  String _verificationLabel(AppLocalizations l10n) => switch (quest.verification) {
+        VerificationMethod.photo => l10n.verificationPhoto,
+        VerificationMethod.location => l10n.verificationLocation,
+        VerificationMethod.timeBased => l10n.verificationTime,
+        VerificationMethod.manual => l10n.verificationManual,
       };
 
   IconData get _verificationIcon => switch (quest.verification) {
@@ -512,6 +526,7 @@ class _QuestDetailSheet extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
     final canComplete = !quest.isCompleted ||
         (quest.isRepeatable && quest.completionCount < quest.maxCompletions);
     return Padding(
@@ -532,14 +547,14 @@ class _QuestDetailSheet extends StatelessWidget {
           ),
           const SizedBox(height: 16),
           Text(
-            quest.title,
+            RegistryL10n.questTitle(Localizations.localeOf(context), quest.id, quest.title),
             style: Theme.of(context).textTheme.titleLarge?.copyWith(
                   fontWeight: FontWeight.bold,
                 ),
           ),
           const SizedBox(height: 8),
           Text(
-            quest.description,
+            RegistryL10n.questDescription(Localizations.localeOf(context), quest.id, quest.description),
             style: const TextStyle(color: AppColors.textSecondary, height: 1.3),
           ),
           const SizedBox(height: 16),
@@ -553,7 +568,7 @@ class _QuestDetailSheet extends StatelessWidget {
               ),
               _DetailPill(
                 icon: _verificationIcon,
-                label: _verificationLabel,
+                label: _verificationLabel(l10n),
               ),
               if (quest.isRepeatable)
                 _DetailPill(
@@ -568,7 +583,7 @@ class _QuestDetailSheet extends StatelessWidget {
             child: ElevatedButton(
               onPressed: canComplete ? onComplete : null,
               child: Text(
-                quest.isCompleted ? 'Complete Again' : 'Complete Quest',
+                quest.isCompleted ? l10n.completeAgain : l10n.completeQuest,
               ),
             ),
           ),

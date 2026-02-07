@@ -1,7 +1,9 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
+import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
+import 'package:travel_buddy/l10n/registry_l10n.dart';
 import 'package:travel_buddy/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy/shared/providers/geolocation_provider.dart';
 
@@ -23,6 +25,8 @@ class MapScreen extends ConsumerWidget {
       return geo.distanceTo(a.latitude!, a.longitude!) <= a.claimRadius!;
     }).toList();
 
+    final l10n = AppLocalizations.of(context)!;
+
     // TODO: Integrate MapLibre GL when MAPTILER_KEY is configured
     return Scaffold(
       body: Stack(
@@ -41,21 +45,21 @@ class MapScreen extends ConsumerWidget {
                   ),
                   const SizedBox(height: 16),
                   Text(
-                    'Map View',
+                    l10n.mapView,
                     style: Theme.of(context).textTheme.titleLarge?.copyWith(
                           color: AppColors.textSecondary,
                         ),
                   ),
                   const SizedBox(height: 8),
                   Text(
-                    'Configure MAPTILER_KEY to enable MapLibre GL',
+                    l10n.configureMapTiler,
                     style: TextStyle(color: AppColors.textMuted, fontSize: 13),
                   ),
                   const SizedBox(height: 24),
                   ElevatedButton.icon(
                     onPressed: geo.isTracking ? null : geoNotifier.getCurrentLocation,
                     icon: const Icon(LucideIcons.navigation, size: 18),
-                    label: Text(geo.isTracking ? 'Locating...' : 'Center on Me'),
+                    label: Text(geo.isTracking ? l10n.locating : l10n.centerOnMe),
                   ),
                   if (geo.error != null) ...[
                     const SizedBox(height: 12),
@@ -91,7 +95,7 @@ class MapScreen extends ConsumerWidget {
                             Icon(LucideIcons.search, size: 18, color: AppColors.textMuted),
                             const SizedBox(width: 10),
                             Text(
-                              'Search achievements...',
+                              l10n.searchAchievements,
                               style: TextStyle(color: AppColors.textMuted),
                             ),
                           ],
@@ -144,14 +148,14 @@ class MapScreen extends ConsumerWidget {
                         const Icon(LucideIcons.mapPin, size: 18, color: AppColors.primary),
                         const SizedBox(width: 8),
                         Text(
-                          'Nearby Achievements',
+                          l10n.nearbyAchievements,
                           style: Theme.of(context).textTheme.titleMedium?.copyWith(
                                 fontWeight: FontWeight.w700,
                               ),
                         ),
                         const Spacer(),
                         Text(
-                          geo.hasLocation ? 'Location on' : 'Location off',
+                          geo.hasLocation ? l10n.locationOn : l10n.locationOff,
                           style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
                         ),
                       ],
@@ -159,12 +163,12 @@ class MapScreen extends ConsumerWidget {
                     const SizedBox(height: 12),
                     if (!geo.hasLocation)
                       Text(
-                        'Enable location to see nearby achievements.',
+                        l10n.enableLocationToSee,
                         style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                       )
                     else if (nearby.isEmpty)
                       Text(
-                        'No achievements within range.',
+                        l10n.noAchievementsInRange,
                         style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
                       )
                     else
@@ -187,12 +191,12 @@ class MapScreen extends ConsumerWidget {
                                 crossAxisAlignment: CrossAxisAlignment.start,
                                 children: [
                                   Text(
-                                    achievement.title,
+                                    RegistryL10n.achievementTitle(Localizations.localeOf(context), achievement.id, achievement.title),
                                     style: const TextStyle(fontWeight: FontWeight.w600),
                                   ),
                                   const SizedBox(height: 4),
                                   Text(
-                                    achievement.description,
+                                    RegistryL10n.achievementDescription(Localizations.localeOf(context), achievement.id, achievement.description),
                                     maxLines: 2,
                                     overflow: TextOverflow.ellipsis,
                                     style: const TextStyle(color: AppColors.textMuted, fontSize: 12),
@@ -205,7 +209,7 @@ class MapScreen extends ConsumerWidget {
                                           ? null
                                           : () => achievementsNotifier
                                               .claimAchievement(achievement.id),
-                                      child: Text(achievement.isUnlocked ? 'Unlocked' : 'Claim'),
+                                      child: Text(achievement.isUnlocked ? l10n.unlocked : l10n.claim),
                                     ),
                                   ),
                                 ],

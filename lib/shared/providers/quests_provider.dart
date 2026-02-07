@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:travel_buddy/shared/models/side_quest.dart';
 import 'package:travel_buddy/shared/providers/user_profile_provider.dart';
+import 'package:travel_buddy/shared/providers/persistence_provider.dart';
 import 'package:travel_buddy/shared/data/quest_registry.dart';
 
 class QuestsState {
@@ -69,68 +70,71 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
   }
 
   void _loadQuests() {
+    final persistence = ref.read(persistenceServiceProvider);
+
+    // Load saved data
+    final savedCompletions = persistence.loadCompletedQuests();
+    final savedSkillXp = persistence.loadSkillXp();
+    final streakData = persistence.loadStreakData();
+
+    // Default skill XP values (demo data)
+    final defaultSkillXp = <String, int>{
+      'hiker': 620, 'camper': 180, 'angler': 240, 'naturalist': 150,
+      'stargazer': 80, 'gardener': 50, 'diver': 320, 'surfer': 180,
+      'sailor': 100, 'kayaker': 220, 'swimmer': 150, 'skydiver': 50,
+      'climber': 180, 'skier': 240, 'snowboarder': 120, 'paraglider': 80,
+      'runner': 200, 'biker': 180, 'yogi': 320, 'martial': 100,
+      'chef': 290, 'baker': 150, 'grillmaster': 180, 'sommelier': 100,
+      'barista': 250, 'mixologist': 120, 'foodie': 380, 'historian': 200,
+      'artist': 120, 'musician': 80, 'linguist': 200, 'partygoer': 150,
+      'dancer': 100, 'socialite': 280, 'volunteer': 180, 'photographer': 510,
+      'explorer': 350, 'shopper': 180, 'nomad': 90, 'backpacker': 260,
+      'roadtripper': 210, 'pilot': 50, 'festival': 120, 'sunset': 200,
+      'aurora': 30,
+    };
+
+    // Use saved skill XP if available, otherwise default
+    final skillXp = savedSkillXp.isNotEmpty ? savedSkillXp : defaultSkillXp;
+
+    // Merge saved completions onto quest registry
+    final mergedQuests = questRegistry.map((q) {
+      final savedCount = savedCompletions[q.id];
+      if (savedCount != null && savedCount > 0) {
+        return q.copyWith(
+          completionCount: savedCount,
+          isCompleted: true,
+        );
+      }
+      return q;
+    }).toList();
+
+    // Use saved streak if available, otherwise default to 5 for demo
+    final streak = streakData.currentStreak > 0
+        ? streakData.currentStreak
+        : (savedCompletions.isEmpty ? 5 : 0);
+
     state = QuestsState(
-      allQuests: questRegistry,
-      skillXp: const {
-        // Outdoor & Nature
-        'hiker': 620,
-        'camper': 180,
-        'angler': 240,
-        'naturalist': 150,
-        'stargazer': 80,
-        'gardener': 50,
-        // Water Sports
-        'diver': 320,
-        'surfer': 180,
-        'sailor': 100,
-        'kayaker': 220,
-        'swimmer': 150,
-        // Extreme & Adrenaline
-        'skydiver': 50,
-        'climber': 180,
-        'skier': 240,
-        'snowboarder': 120,
-        'paraglider': 80,
-        // Sports & Fitness
-        'runner': 200,
-        'biker': 180,
-        'yogi': 320,
-        'martial': 100,
-        // Food & Drink
-        'chef': 290,
-        'baker': 150,
-        'grillmaster': 180,
-        'sommelier': 100,
-        'barista': 250,
-        'mixologist': 120,
-        'foodie': 380,
-        // Culture & Arts
-        'historian': 200,
-        'artist': 120,
-        'musician': 80,
-        'linguist': 200,
-        // Social & Nightlife
-        'partygoer': 150,
-        'dancer': 100,
-        'socialite': 280,
-        'volunteer': 180,
-        // Urban & Photography
-        'photographer': 510,
-        'explorer': 350,
-        'shopper': 180,
-        // Travel & Freedom
-        'nomad': 90,
-        'backpacker': 260,
-        'roadtripper': 210,
-        'pilot': 50,
-        // Unique
-        'festival': 120,
-        'sunset': 200,
-        'aurora': 30,
-      },
+      allQuests: mergedQuests,
+      skillXp: skillXp,
       skillLevels: const {},
-      currentStreak: 5,
+      currentStreak: streak,
+      lastCompletionDate: streakData.lastCompletionDate,
     );
+  }
+
+  void _persist() {
+    final persistence = ref.read(persistenceServiceProvider);
+
+    // Save quest completions
+    final completions = <String, int>{};
+    for (final q in state.allQuests) {
+      if (q.completionCount > 0) {
+        completions[q.id] = q.completionCount;
+      }
+    }
+    persistence.saveCompletedQuests(completions);
+    persistence.saveSkillXp(state.skillXp);
+    persistence.saveStreakData(state.currentStreak, state.lastCompletionDate);
   }
 
   void setCategoryFilter(String? category) {
@@ -149,7 +153,7 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
     }
   }
 
-  bool completeQuest(String questId) {
+  bool completeQuest(String questId, {List<String>? photos}) {
     final index = state.allQuests.indexWhere((q) => q.id == questId);
     if (index == -1) return false;
 
@@ -160,17 +164,7 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
     }
 
     final newCount = quest.completionCount + 1;
-    final completed = SideQuest(
-      id: quest.id,
-      title: quest.title,
-      description: quest.description,
-      category: quest.category,
-      skillType: quest.skillType,
-      difficulty: quest.difficulty,
-      xpReward: quest.xpReward,
-      verification: quest.verification,
-      isRepeatable: quest.isRepeatable,
-      maxCompletions: quest.maxCompletions,
+    final completed = quest.copyWith(
       completionCount: newCount,
       isCompleted: true,
     );
@@ -179,7 +173,12 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
     updatedQuests[index] = completed;
 
     // Calculate XP with diminishing returns for repeats
-    final xpEarned = _calculateQuestXp(quest.xpReward, newCount);
+    var xpEarned = _calculateQuestXp(quest.xpReward, newCount);
+
+    // 15% bonus XP when photos are provided
+    if (photos != null && photos.isNotEmpty) {
+      xpEarned = (xpEarned * 1.15).round();
+    }
 
     // Update skill XP
     final updatedSkillXp = Map<String, int>.from(state.skillXp);
@@ -214,8 +213,18 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
       lastCompletionDate: now,
     );
 
+    // Persist photos if provided
+    if (photos != null && photos.isNotEmpty) {
+      final persistence = ref.read(persistenceServiceProvider);
+      final savedPhotos = persistence.loadQuestPhotos();
+      savedPhotos[questId] = [...(savedPhotos[questId] ?? []), ...photos];
+      persistence.saveQuestPhotos(savedPhotos);
+    }
+
     // Award global XP
     ref.read(userProfileProvider.notifier).addXp(xpEarned);
+
+    _persist();
     return true;
   }
 

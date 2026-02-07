@@ -1,6 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:travel_buddy/shared/models/achievement.dart';
 import 'package:travel_buddy/shared/providers/user_profile_provider.dart';
+import 'package:travel_buddy/shared/providers/persistence_provider.dart';
 
 /// Data class for retroactive achievement claims
 class RetroactiveClaimData {
@@ -21,6 +22,7 @@ class AchievementsState {
   final AchievementTier? filterTier;
   final String? filterCollection;
   final String searchQuery;
+  final Set<String> completedCollections;
 
   const AchievementsState({
     this.allAchievements = const [],
@@ -28,6 +30,7 @@ class AchievementsState {
     this.filterTier,
     this.filterCollection,
     this.searchQuery = '',
+    this.completedCollections = const {},
   });
 
   List<Achievement> get filteredAchievements {
@@ -56,6 +59,7 @@ class AchievementsState {
     AchievementTier? filterTier,
     String? filterCollection,
     String? searchQuery,
+    Set<String>? completedCollections,
     bool clearTierFilter = false,
     bool clearCollectionFilter = false,
   }) {
@@ -67,6 +71,7 @@ class AchievementsState {
           ? null
           : (filterCollection ?? this.filterCollection),
       searchQuery: searchQuery ?? this.searchQuery,
+      completedCollections: completedCollections ?? this.completedCollections,
     );
   }
 }
@@ -79,12 +84,40 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
   }
 
   void _loadAchievements() {
-    // Load from achievement registry data
+    final persistence = ref.read(persistenceServiceProvider);
+    final savedAchievements = persistence.loadUnlockedAchievements();
+    final savedCollections = persistence.loadCompletedCollections();
+
+    // Build a map of saved data by id
+    final savedMap = <String, Map<String, dynamic>>{};
+    for (final json in savedAchievements) {
+      final id = json['id'] as String?;
+      if (id != null) savedMap[id] = json;
+    }
+
+    // Merge saved state onto registry
+    final merged = achievementRegistry.map((a) {
+      final saved = savedMap[a.id];
+      if (saved != null) {
+        return Achievement.fromJsonOverlay(a, saved);
+      }
+      return a;
+    }).toList();
+
     state = AchievementsState(
-      allAchievements: achievementRegistry,
-      unlockedAchievements:
-          achievementRegistry.where((a) => a.isUnlocked).toList(),
+      allAchievements: merged,
+      unlockedAchievements: merged.where((a) => a.isUnlocked).toList(),
+      completedCollections: savedCollections,
     );
+  }
+
+  void _persist() {
+    final persistence = ref.read(persistenceServiceProvider);
+    final unlockedJsons = state.unlockedAchievements
+        .map((a) => a.toJson())
+        .toList();
+    persistence.saveUnlockedAchievements(unlockedJsons);
+    persistence.saveCompletedCollections(state.completedCollections);
   }
 
   void setTierFilter(AchievementTier? tier) {
@@ -118,21 +151,9 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     final isRetroactive = retroactiveData != null;
     final claimDate = DateTime.now();
 
-    final unlocked = Achievement(
-      id: achievement.id,
-      title: achievement.title,
-      description: achievement.description,
-      iconName: achievement.iconName,
-      tier: achievement.tier,
-      xpReward: achievement.xpReward,
-      latitude: achievement.latitude,
-      longitude: achievement.longitude,
-      claimRadius: achievement.claimRadius,
-      collectionId: achievement.collectionId,
-      tags: achievement.tags,
+    final unlocked = achievement.copyWith(
       isUnlocked: true,
       unlockedAt: claimDate,
-      // Retroactive claiming fields
       visitDate: isRetroactive ? retroactiveData.visitDate : claimDate,
       photos: isRetroactive ? retroactiveData.photos : const [],
       notes: isRetroactive ? retroactiveData.notes : null,
@@ -142,16 +163,66 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     final updatedAll = [...state.allAchievements];
     updatedAll[index] = unlocked;
 
+    // Check for collection completion
+    final collectionId = achievement.collectionId;
+    var completedCollections = Set<String>.from(state.completedCollections);
+    String? newlyCompletedCollection;
+
+    if (collectionId != null && !completedCollections.contains(collectionId)) {
+      final collectionAchievements =
+          updatedAll.where((a) => a.collectionId == collectionId).toList();
+      final allUnlocked = collectionAchievements.every((a) => a.isUnlocked);
+      if (allUnlocked) {
+        completedCollections.add(collectionId);
+        newlyCompletedCollection = collectionId;
+      }
+    }
+
     state = state.copyWith(
       allAchievements: updatedAll,
       unlockedAchievements: [...state.unlockedAchievements, unlocked],
+      completedCollections: completedCollections,
     );
 
-    // Award XP (slightly reduced for retroactive claims to incentivize real-time claiming)
+    // Award XP (slightly reduced for retroactive claims)
     final xpMultiplier = isRetroactive ? 0.8 : 1.0;
     final xpAwarded = (achievement.xpReward * xpMultiplier).round();
     ref.read(userProfileProvider.notifier).addXp(xpAwarded);
+
+    // Award collection bonus XP if newly completed
+    if (newlyCompletedCollection != null) {
+      _lastCompletedCollection = newlyCompletedCollection;
+      final bonusXp = _collectionBonusXp(newlyCompletedCollection);
+      if (bonusXp > 0) {
+        ref.read(userProfileProvider.notifier).addXp(bonusXp);
+      }
+    }
+
+    _persist();
     return true;
+  }
+
+  /// Returns the newly completed collection ID if the last claim completed one, else null.
+  String? get lastCompletedCollection => _lastCompletedCollection;
+  String? _lastCompletedCollection;
+
+  /// Call after showing the celebration dialog to clear.
+  void clearLastCompletedCollection() {
+    _lastCompletedCollection = null;
+  }
+
+  int _collectionBonusXp(String collectionId) {
+    const bonuses = {
+      'getting-started': 50,
+      'cities': 75,
+      'nature': 100,
+      'food-drink': 75,
+      'culture': 100,
+      'photography': 75,
+      'countries': 200,
+      'water-sports': 100,
+    };
+    return bonuses[collectionId] ?? 50;
   }
 }
 
