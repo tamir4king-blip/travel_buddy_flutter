@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:geolocator/geolocator.dart';
 import 'package:travel_buddy/shared/models/achievement.dart';
 import 'package:travel_buddy/shared/providers/user_profile_provider.dart';
 import 'package:travel_buddy/shared/providers/persistence_provider.dart';
@@ -140,7 +141,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     state = state.copyWith(searchQuery: query);
   }
 
-  bool claimAchievement(String achievementId, {RetroactiveClaimData? retroactiveData}) {
+  bool claimAchievement(String achievementId, {RetroactiveClaimData? retroactiveData, double? userLat, double? userLng}) {
     final index =
         state.allAchievements.indexWhere((a) => a.id == achievementId);
     if (index == -1) return false;
@@ -149,6 +150,21 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     if (achievement.isUnlocked) return false;
 
     final isRetroactive = retroactiveData != null;
+
+    // Location-gated validation for achievements with coordinates
+    // Skip for retroactive claims (they have date-based validation)
+    if (!isRetroactive &&
+        achievement.latitude != null &&
+        achievement.longitude != null &&
+        achievement.claimRadius != null &&
+        userLat != null &&
+        userLng != null) {
+      final distance = Geolocator.distanceBetween(
+        userLat, userLng, achievement.latitude!, achievement.longitude!,
+      );
+      if (distance > achievement.claimRadius!) return false;
+    }
+
     final claimDate = DateTime.now();
 
     final unlocked = achievement.copyWith(
