@@ -154,6 +154,20 @@
 
   "add": "הוסף",
 
+  "liveTracking": "מעקב חי",
+  "liveTrackingDescription": "מעקב GPS רציף להתראות קרבה",
+  "achievementNearby": "הישג בקרבת מקום",
+  "distanceAway": "משם",
+  "getCloser": "התקרב",
+  "inRange": "בטווח",
+  "startTracking": "התחל מעקב",
+  "stopTracking": "עצור מעקב",
+  "trackingActive": "מעקב פעיל",
+  "trackingOff": "מעקב כבוי",
+  "achievementsNearYou": "{count, plural, =1{הישג אחד בקרבתך} other{{count} הישגים בקרבתך}}",
+  "@achievementsNearYou": { "placeholders": { "count": { "type": "int" } } },
+  "tapToClaim": "הקש לתביעה",
+
   "english": "English",
   "hebrew": "עברית"
 }

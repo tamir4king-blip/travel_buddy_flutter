@@ -169,6 +169,20 @@
 
   "add": "Add",
 
+  "liveTracking": "Live Tracking",
+  "liveTrackingDescription": "Continuous GPS tracking for proximity alerts",
+  "achievementNearby": "ACHIEVEMENT NEARBY",
+  "distanceAway": "away",
+  "getCloser": "Get Closer",
+  "inRange": "In Range",
+  "startTracking": "Start Tracking",
+  "stopTracking": "Stop Tracking",
+  "trackingActive": "Tracking Active",
+  "trackingOff": "Tracking Off",
+  "achievementsNearYou": "{count, plural, =1{1 achievement near you} other{{count} achievements near you}}",
+  "@achievementsNearYou": { "placeholders": { "count": { "type": "int" } } },
+  "tapToClaim": "Tap to claim",
+
   "english": "English",
   "hebrew": "עברית"
 }
