@@ -1,10 +1,12 @@
+import 'dart:async';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
 
 class GeolocationState {
   final double? latitude;
   final double? longitude;
-  final bool isTracking;
+  final bool isTracking; // one-shot fetch in progress
+  final bool isLiveTracking; // continuous stream active
   final bool hasPermission;
   final String? error;
 
@@ -12,6 +14,7 @@ class GeolocationState {
     this.latitude,
     this.longitude,
     this.isTracking = false,
+    this.isLiveTracking = false,
     this.hasPermission = false,
     this.error,
   });
@@ -27,6 +30,7 @@ class GeolocationState {
     double? latitude,
     double? longitude,
     bool? isTracking,
+    bool? isLiveTracking,
     bool? hasPermission,
     String? error,
   }) {
@@ -34,6 +38,7 @@ class GeolocationState {
       latitude: latitude ?? this.latitude,
       longitude: longitude ?? this.longitude,
       isTracking: isTracking ?? this.isTracking,
+      isLiveTracking: isLiveTracking ?? this.isLiveTracking,
       hasPermission: hasPermission ?? this.hasPermission,
       error: error ?? this.error,
     );
@@ -42,6 +47,8 @@ class GeolocationState {
 
 class GeolocationNotifier extends StateNotifier<GeolocationState> {
   GeolocationNotifier() : super(const GeolocationState());
+
+  StreamSubscription<Position>? _positionSubscription;
 
   Future<void> requestPermission() async {
     try {
@@ -92,10 +99,55 @@ class GeolocationNotifier extends StateNotifier<GeolocationState> {
     }
   }
 
+  Future<void> startTracking() async {
+    if (state.isLiveTracking) return;
+
+    if (!state.hasPermission) await requestPermission();
+    if (!state.hasPermission) return;
+
+    const locationSettings = LocationSettings(
+      accuracy: LocationAccuracy.high,
+      distanceFilter: 10, // 10m movement threshold
+    );
+
+    _positionSubscription = Geolocator.getPositionStream(
+      locationSettings: locationSettings,
+    ).listen(
+      (position) {
+        state = state.copyWith(
+          latitude: position.latitude,
+          longitude: position.longitude,
+        );
+      },
+      onError: (error) {
+        state = state.copyWith(
+          isLiveTracking: false,
+          error: error.toString(),
+        );
+        _positionSubscription?.cancel();
+        _positionSubscription = null;
+      },
+    );
+
+    state = state.copyWith(isLiveTracking: true);
+  }
+
+  void stopTracking() {
+    _positionSubscription?.cancel();
+    _positionSubscription = null;
+    state = state.copyWith(isLiveTracking: false);
+  }
+
   bool isWithinRadius(double lat, double lng, double radiusMeters) {
     if (!state.hasLocation) return false;
     final distance = state.distanceTo(lat, lng);
     return distance <= radiusMeters;
+  }
+
+  @override
+  void dispose() {
+    _positionSubscription?.cancel();
+    super.dispose();
   }
 }
 
