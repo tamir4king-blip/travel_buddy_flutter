@@ -17,6 +17,7 @@ class PersistenceService {
   static const _keyCompletedCollections = 'completed_collections';
   static const _keyQuestPhotos = 'quest_photos';
   static const _keyLocale = 'app_locale';
+  static const _keyLiveTracking = 'live_tracking';
 
   // --- User Profile ---
 
@@ -136,6 +137,16 @@ class PersistenceService {
     return _prefs.getString(_keyLocale);
   }
 
+  // --- Live Tracking ---
+
+  Future<void> saveLiveTracking(bool enabled) async {
+    await _prefs.setBool(_keyLiveTracking, enabled);
+  }
+
+  bool loadLiveTracking() {
+    return _prefs.getBool(_keyLiveTracking) ?? false;
+  }
+
   // --- Clear All ---
 
   Future<void> clearAll() async {
@@ -148,5 +159,6 @@ class PersistenceService {
     await _prefs.remove(_keyCompletedCollections);
     await _prefs.remove(_keyQuestPhotos);
     await _prefs.remove(_keyLocale);
+    await _prefs.remove(_keyLiveTracking);
   }
 }

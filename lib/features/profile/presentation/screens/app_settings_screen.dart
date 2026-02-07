@@ -3,7 +3,9 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
+import 'package:travel_buddy/shared/providers/geolocation_provider.dart';
 import 'package:travel_buddy/shared/providers/locale_provider.dart';
+import 'package:travel_buddy/shared/providers/persistence_provider.dart';
 
 class AppSettingsScreen extends ConsumerWidget {
   const AppSettingsScreen({super.key});
@@ -92,6 +94,7 @@ class AppSettingsScreen extends ConsumerWidget {
     final l10n = AppLocalizations.of(context)!;
     final currentLocale = ref.watch(localeProvider);
     final isRtl = Directionality.of(context) == TextDirection.rtl;
+    final geo = ref.watch(geolocationProvider);
 
     return Scaffold(
       appBar: AppBar(
@@ -141,11 +144,39 @@ class AppSettingsScreen extends ConsumerWidget {
                     style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
                   ),
                   trailing: Switch(
-                    value: false,
+                    value: geo.hasPermission,
                     activeColor: AppColors.primary,
-                    onChanged: (value) {
-                      // TODO: Request GPS permission
+                    onChanged: (value) async {
+                      if (value) {
+                        await ref.read(geolocationProvider.notifier).requestPermission();
+                      }
                     },
+                  ),
+                ),
+                const Divider(height: 1, color: AppColors.bgCardLight),
+                ListTile(
+                  leading: const Icon(LucideIcons.radio, size: 20, color: AppColors.textPrimary),
+                  title: Text(l10n.liveTracking, style: const TextStyle(color: AppColors.textPrimary)),
+                  subtitle: Text(
+                    l10n.liveTrackingDescription,
+                    style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                  ),
+                  enabled: geo.hasPermission,
+                  trailing: Switch(
+                    value: geo.isLiveTracking,
+                    activeColor: AppColors.success,
+                    onChanged: geo.hasPermission
+                        ? (value) async {
+                            final persistence = ref.read(persistenceServiceProvider);
+                            if (value) {
+                              await ref.read(geolocationProvider.notifier).startTracking();
+                              await persistence.saveLiveTracking(true);
+                            } else {
+                              ref.read(geolocationProvider.notifier).stopTracking();
+                              await persistence.saveLiveTracking(false);
+                            }
+                          }
+                        : null,
                   ),
                 ),
               ],
