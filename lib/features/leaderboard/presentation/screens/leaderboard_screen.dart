@@ -4,6 +4,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
+import 'package:travel_buddy/features/profile/presentation/widgets/profile_avatar.dart';
 import 'package:travel_buddy/shared/providers/leaderboard_provider.dart';
 import 'package:travel_buddy/shared/widgets/responsive_layout.dart';
 
@@ -16,80 +17,213 @@ class LeaderboardScreen extends ConsumerWidget {
     final state = ref.watch(leaderboardProvider);
     final notifier = ref.read(leaderboardProvider.notifier);
 
+    // Loading state — first load with no data
+    if (state.isLoading && state.entries.isEmpty) {
+      return SafeArea(
+        child: Center(
+          child: CircularProgressIndicator(color: AppColors.primary),
+        ),
+      );
+    }
+
+    // Error state — no data available
+    if (state.errorMessage != null && state.entries.isEmpty) {
+      return SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.all(32),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Icon(LucideIcons.alertCircle, size: 48, color: AppColors.error),
+                const SizedBox(height: 16),
+                Text(
+                  state.errorMessage!,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(color: AppColors.textSecondary),
+                ),
+                const SizedBox(height: 16),
+                ElevatedButton.icon(
+                  onPressed: () => notifier.refresh(),
+                  icon: const Icon(LucideIcons.refreshCw, size: 16),
+                  label: Text(l10n.retry),
+                ),
+              ],
+            ),
+          ),
+        ),
+      );
+    }
+
     final top3 = state.entries.where((e) => e.rank <= 3).toList();
     final rest = state.entries.where((e) => e.rank > 3).toList();
 
     return SafeArea(
       child: ResponsiveLayout(
-        child: CustomScrollView(
-          slivers: [
-            SliverToBoxAdapter(
-              child: Padding(
-                padding: const EdgeInsets.all(20),
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(
-                    l10n.leaderboard,
-                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                          fontWeight: FontWeight.bold,
+        child: RefreshIndicator(
+          onRefresh: () => notifier.refresh(),
+          color: AppColors.primary,
+          child: CustomScrollView(
+            slivers: [
+              SliverToBoxAdapter(
+                child: Padding(
+                  padding: const EdgeInsets.all(20),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      l10n.leaderboard,
+                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                            fontWeight: FontWeight.bold,
+                          ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      l10n.participants(state.totalParticipants),
+                      style: TextStyle(color: AppColors.textSecondary),
+                    ),
+                    const SizedBox(height: 16),
+
+                    Row(
+                      children: [
+                        _TimeChip(
+                          label: l10n.weekly,
+                          isSelected: state.timeRange == TimeRange.weekly,
+                          onTap: () => notifier.setTimeRange(TimeRange.weekly),
                         ),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    l10n.participants(state.totalParticipants),
-                    style: TextStyle(color: AppColors.textSecondary),
-                  ),
-                  const SizedBox(height: 16),
+                        const SizedBox(width: 8),
+                        _TimeChip(
+                          label: l10n.monthly,
+                          isSelected: state.timeRange == TimeRange.monthly,
+                          onTap: () => notifier.setTimeRange(TimeRange.monthly),
+                        ),
+                        const SizedBox(width: 8),
+                        _TimeChip(
+                          label: l10n.allTime,
+                          isSelected: state.timeRange == TimeRange.allTime,
+                          onTap: () => notifier.setTimeRange(TimeRange.allTime),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 16),
 
-                  Row(
-                    children: [
-                      _TimeChip(
-                        label: l10n.weekly,
-                        isSelected: state.timeRange == TimeRange.weekly,
-                        onTap: () => notifier.setTimeRange(TimeRange.weekly),
-                      ),
-                      const SizedBox(width: 8),
-                      _TimeChip(
-                        label: l10n.monthly,
-                        isSelected: state.timeRange == TimeRange.monthly,
-                        onTap: () => notifier.setTimeRange(TimeRange.monthly),
-                      ),
-                      const SizedBox(width: 8),
-                      _TimeChip(
-                        label: l10n.allTime,
-                        isSelected: state.timeRange == TimeRange.allTime,
-                        onTap: () => notifier.setTimeRange(TimeRange.allTime),
-                      ),
-                    ],
-                  ),
-                  const SizedBox(height: 24),
+                    if (state.currentUserEntry != null)
+                      _YourRankCard(entry: state.currentUserEntry!, l10n: l10n),
+                    const SizedBox(height: 16),
 
-                  if (top3.length >= 3) _Podium(entries: top3),
-                  const SizedBox(height: 24),
-                ],
+                    if (top3.length >= 3) _Podium(entries: top3),
+                    const SizedBox(height: 24),
+                  ],
+                ),
+              ),
+            ),
+
+            SliverPadding(
+              padding: const EdgeInsets.symmetric(horizontal: 20),
+              sliver: SliverList.separated(
+                itemCount: rest.length,
+                separatorBuilder: (_, __) => const SizedBox(height: 8),
+                itemBuilder: (context, index) {
+                  final entry = rest[index];
+                  return _RankTile(entry: entry)
+                      .animate()
+                      .fadeIn(duration: 300.ms, delay: (index * 60).ms);
+                },
+              ),
+            ),
+            const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          ],
+        ),
+        ),
+      ),
+    );
+  }
+}
+
+class _YourRankCard extends StatelessWidget {
+  final LeaderboardEntry entry;
+  final AppLocalizations l10n;
+
+  const _YourRankCard({required this.entry, required this.l10n});
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(16),
+        gradient: LinearGradient(
+          colors: [
+            AppColors.primary.withValues(alpha: 0.2),
+            AppColors.primaryLight.withValues(alpha: 0.1),
+          ],
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+        ),
+        border: Border.all(
+          color: AppColors.primary.withValues(alpha: 0.4),
+          width: 1.5,
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.2),
+              shape: BoxShape.circle,
+            ),
+            child: Center(
+              child: Text(
+                '#${entry.rank}',
+                style: const TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: AppColors.primaryLight,
+                  fontSize: 13,
+                ),
               ),
             ),
           ),
-
-          SliverPadding(
-            padding: const EdgeInsets.symmetric(horizontal: 20),
-            sliver: SliverList.separated(
-              itemCount: rest.length,
-              separatorBuilder: (_, __) => const SizedBox(height: 8),
-              itemBuilder: (context, index) {
-                final entry = rest[index];
-                return _RankTile(entry: entry)
-                    .animate()
-                    .fadeIn(duration: 300.ms, delay: (index * 60).ms);
-              },
+          const SizedBox(width: 12),
+          ProfileAvatar(
+            avatarUrl: entry.avatarUrl,
+            displayName: entry.displayName,
+            radius: 20,
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  l10n.yourRank,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                  ),
+                ),
+                Text(
+                  '${entry.displayName} \u2022 ${l10n.levelN(entry.level)}',
+                  style: const TextStyle(
+                    color: AppColors.textSecondary,
+                    fontSize: 12,
+                  ),
+                ),
+              ],
             ),
           ),
-          const SliverToBoxAdapter(child: SizedBox(height: 100)),
+          Text(
+            '${entry.totalXp} XP',
+            style: const TextStyle(
+              color: AppColors.xpGreen,
+              fontWeight: FontWeight.bold,
+              fontSize: 14,
+            ),
+          ),
         ],
       ),
-      ),
-    );
+    ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.05);
   }
 }
 
@@ -145,24 +279,22 @@ class _PodiumSpot extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    final isFirst = entry.rank == 1;
     return Column(
       children: [
-        CircleAvatar(
-          radius: entry.rank == 1 ? 28 : 22,
-          backgroundColor: color.withValues(alpha: 0.3),
-          child: Text(
-            entry.displayName[0],
-            style: TextStyle(
-              color: color,
-              fontWeight: FontWeight.bold,
-              fontSize: entry.rank == 1 ? 20 : 16,
-            ),
-          ),
+        ProfileAvatar(
+          avatarUrl: entry.avatarUrl,
+          displayName: entry.displayName,
+          radius: isFirst ? 28 : 22,
         ),
         const SizedBox(height: 8),
         Text(entry.displayName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
         Text('${entry.totalXp} XP', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
-        const SizedBox(height: 8),
+        Text(
+          'Lv ${entry.level}',
+          style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600),
+        ),
+        const SizedBox(height: 6),
         Container(
           height: height,
           decoration: BoxDecoration(
@@ -171,7 +303,7 @@ class _PodiumSpot extends StatelessWidget {
           ),
           child: Center(
             child: Icon(
-              entry.rank == 1 ? LucideIcons.crown : LucideIcons.trophy,
+              isFirst ? LucideIcons.crown : LucideIcons.trophy,
               color: color,
               size: 24,
             ),
@@ -212,19 +344,25 @@ class _RankTile extends StatelessWidget {
               ),
             ),
           ),
-          CircleAvatar(
+          ProfileAvatar(
+            avatarUrl: entry.avatarUrl,
+            displayName: entry.displayName,
             radius: 18,
-            backgroundColor: AppColors.bgCardLight,
-            child: Text(
-              entry.displayName[0],
-              style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 14),
-            ),
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              entry.displayName,
-              style: TextStyle(fontWeight: entry.isCurrentUser ? FontWeight.bold : FontWeight.w500),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  entry.displayName,
+                  style: TextStyle(fontWeight: entry.isCurrentUser ? FontWeight.bold : FontWeight.w500),
+                ),
+                Text(
+                  'Lv ${entry.level}',
+                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                ),
+              ],
             ),
           ),
           Text(

@@ -5,6 +5,7 @@
   "navMap": "מפה",
   "navQuests": "משימות",
   "navRankings": "דירוגים",
+  "navAchievements": "הישגים",
   "navProfile": "פרופיל",
 
   "welcomeBack": "ברוך שובך,",
@@ -23,14 +24,10 @@
   "yourCollections": "האוספים שלך",
   "complete": "הושלם",
 
-  "collectionCities": "ערים",
-  "collectionNature": "טבע",
-  "collectionFoodDrink": "אוכל ושתייה",
+  "collectionBeaches": "חופים",
+  "collectionLandmarks": "ציוני דרך",
+  "collectionParks": "פארקים",
   "collectionCulture": "תרבות",
-  "collectionPhotography": "צילום",
-  "collectionCountries": "מדינות",
-  "collectionWaterSports": "ספורט מים",
-  "collectionGettingStarted": "תחילת הדרך",
 
   "totalXp": "סה\"כ XP",
   "level": "רמה",
@@ -167,6 +164,34 @@
   "achievementsNearYou": "{count, plural, =1{הישג אחד בקרבתך} other{{count} הישגים בקרבתך}}",
   "@achievementsNearYou": { "placeholders": { "count": { "type": "int" } } },
   "tapToClaim": "הקש לתביעה",
+
+  "visitToUnlock": "בקר כדי לפתוח",
+  "unlockedOn": "נפתח ב-{date}",
+  "kmAway": "{distance} ק\"מ משם",
+  "mAway": "{distance} מ׳ משם",
+
+  "memberSince": "חבר מאז {date}",
+  "@memberSince": { "placeholders": { "date": { "type": "String" } } },
+  "topSkills": "כישורים מובילים",
+  "seeAll": "הצג הכל",
+  "recentAchievements": "הישגים אחרונים",
+  "collections": "אוספים",
+  "changePhoto": "שנה תמונה",
+  "profileUpdated": "הפרופיל עודכן",
+
+  "displayNameRequired": "שם תצוגה הוא שדה חובה",
+  "displayNameTooLong": "שם תצוגה חייב להיות 30 תווים או פחות",
+  "usernameTooShort": "שם משתמש חייב להיות לפחות 3 תווים",
+  "usernameTooLong": "שם משתמש חייב להיות 20 תווים או פחות",
+  "usernameInvalid": "שם משתמש יכול להכיל רק אותיות, מספרים וקו תחתון",
+  "bioTooLong": "אודות חייב להיות 200 תווים או פחות",
+
+  "noSkillsYet": "השלם משימות כדי לפתח את הכישורים שלך!",
+  "noAchievementsYet": "התחל לחקור כדי לפתוח הישגים!",
+
+  "yourRank": "הדירוג שלך",
+  "retry": "נסה שוב",
+  "rankN": "דירוג #{rank}",
 
   "english": "English",
   "hebrew": "עברית"

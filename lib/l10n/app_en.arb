@@ -5,6 +5,7 @@
   "navMap": "Map",
   "navQuests": "Quests",
   "navRankings": "Rankings",
+  "navAchievements": "Achievements",
   "navProfile": "Profile",
 
   "welcomeBack": "Welcome back,",
@@ -28,14 +29,10 @@
   "yourCollections": "Your Collections",
   "complete": "COMPLETE",
 
-  "collectionCities": "Cities",
-  "collectionNature": "Nature",
-  "collectionFoodDrink": "Food & Drink",
+  "collectionBeaches": "Beaches",
+  "collectionLandmarks": "Landmarks",
+  "collectionParks": "Parks",
   "collectionCulture": "Culture",
-  "collectionPhotography": "Photography",
-  "collectionCountries": "Countries",
-  "collectionWaterSports": "Water Sports",
-  "collectionGettingStarted": "Getting Started",
 
   "totalXp": "Total XP",
   "level": "Level",
@@ -182,6 +179,38 @@
   "achievementsNearYou": "{count, plural, =1{1 achievement near you} other{{count} achievements near you}}",
   "@achievementsNearYou": { "placeholders": { "count": { "type": "int" } } },
   "tapToClaim": "Tap to claim",
+
+  "visitToUnlock": "Visit to unlock",
+  "unlockedOn": "Unlocked on {date}",
+  "@unlockedOn": { "placeholders": { "date": { "type": "String" } } },
+  "kmAway": "{distance}km away",
+  "@kmAway": { "placeholders": { "distance": { "type": "String" } } },
+  "mAway": "{distance}m away",
+  "@mAway": { "placeholders": { "distance": { "type": "String" } } },
+
+  "memberSince": "Member since {date}",
+  "@memberSince": { "placeholders": { "date": { "type": "String" } } },
+  "topSkills": "Top Skills",
+  "seeAll": "See All",
+  "recentAchievements": "Recent Achievements",
+  "collections": "Collections",
+  "changePhoto": "Change Photo",
+  "profileUpdated": "Profile updated",
+
+  "displayNameRequired": "Display name is required",
+  "displayNameTooLong": "Display name must be 30 characters or less",
+  "usernameTooShort": "Username must be at least 3 characters",
+  "usernameTooLong": "Username must be 20 characters or less",
+  "usernameInvalid": "Username can only contain letters, numbers, and underscores",
+  "bioTooLong": "Bio must be 200 characters or less",
+
+  "noSkillsYet": "Complete quests to develop your skills!",
+  "noAchievementsYet": "Start exploring to unlock achievements!",
+
+  "yourRank": "Your Rank",
+  "retry": "Retry",
+  "rankN": "Rank #{rank}",
+  "@rankN": { "placeholders": { "rank": { "type": "int" } } },
 
   "english": "English",
   "hebrew": "עברית"
