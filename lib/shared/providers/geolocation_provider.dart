@@ -9,6 +9,7 @@ class GeolocationState {
   final bool isLiveTracking; // continuous stream active
   final bool hasPermission;
   final String? error;
+  final bool isSpoofing;
 
   const GeolocationState({
     this.latitude,
@@ -17,6 +18,7 @@ class GeolocationState {
     this.isLiveTracking = false,
     this.hasPermission = false,
     this.error,
+    this.isSpoofing = false,
   });
 
   bool get hasLocation => latitude != null && longitude != null;
@@ -33,6 +35,7 @@ class GeolocationState {
     bool? isLiveTracking,
     bool? hasPermission,
     String? error,
+    bool? isSpoofing,
   }) {
     return GeolocationState(
       latitude: latitude ?? this.latitude,
@@ -41,6 +44,7 @@ class GeolocationState {
       isLiveTracking: isLiveTracking ?? this.isLiveTracking,
       hasPermission: hasPermission ?? this.hasPermission,
       error: error ?? this.error,
+      isSpoofing: isSpoofing ?? this.isSpoofing,
     );
   }
 }
@@ -136,6 +140,28 @@ class GeolocationNotifier extends StateNotifier<GeolocationState> {
     _positionSubscription?.cancel();
     _positionSubscription = null;
     state = state.copyWith(isLiveTracking: false);
+  }
+
+  void enableSpoof(double lat, double lng) {
+    _positionSubscription?.cancel();
+    _positionSubscription = null;
+    state = GeolocationState(
+      latitude: lat,
+      longitude: lng,
+      isTracking: false,
+      isLiveTracking: true,
+      hasPermission: true,
+      isSpoofing: true,
+    );
+  }
+
+  void updateSpoofedLocation(double lat, double lng) {
+    if (!state.isSpoofing) return;
+    state = state.copyWith(latitude: lat, longitude: lng);
+  }
+
+  void disableSpoof() {
+    state = const GeolocationState();
   }
 
   bool isWithinRadius(double lat, double lng, double radiusMeters) {

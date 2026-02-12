@@ -7,6 +7,7 @@ import 'package:travel_buddy/core/theme/app_theme.dart';
 import 'package:travel_buddy/features/profile/presentation/widgets/profile_avatar.dart';
 import 'package:travel_buddy/shared/providers/leaderboard_provider.dart';
 import 'package:travel_buddy/shared/widgets/responsive_layout.dart';
+import 'package:travel_buddy/shared/widgets/visual_extras.dart';
 
 class LeaderboardScreen extends ConsumerWidget {
   const LeaderboardScreen({super.key});
@@ -55,12 +56,15 @@ class LeaderboardScreen extends ConsumerWidget {
       );
     }
 
-    final top3 = state.entries.where((e) => e.rank <= 3).toList();
-    final rest = state.entries.where((e) => e.rank > 3).toList();
+    final hasFullPodium = state.entries.length >= 3;
+    final top3 = hasFullPodium ? state.entries.where((e) => e.rank <= 3).toList() : <LeaderboardEntry>[];
+    final rest = hasFullPodium ? state.entries.where((e) => e.rank > 3).toList() : state.entries;
 
     return SafeArea(
       child: ResponsiveLayout(
-        child: RefreshIndicator(
+        child: AnimatedBackground(
+          accentColor: AppColors.accent,
+          child: RefreshIndicator(
           onRefresh: () => notifier.refresh(),
           color: AppColors.primary,
           child: CustomScrollView(
@@ -68,55 +72,55 @@ class LeaderboardScreen extends ConsumerWidget {
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.all(20),
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      l10n.leaderboard,
-                      style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                            fontWeight: FontWeight.bold,
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        l10n.leaderboard,
+                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                              fontWeight: FontWeight.bold,
+                            ),
+                      ),
+                      const SizedBox(height: 4),
+                      Text(
+                        l10n.participants(state.totalParticipants),
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                      const SizedBox(height: 16),
+
+                      Row(
+                        children: [
+                          _TimeChip(
+                            label: l10n.weekly,
+                            isSelected: state.timeRange == TimeRange.weekly,
+                            onTap: () => notifier.setTimeRange(TimeRange.weekly),
                           ),
-                    ),
-                    const SizedBox(height: 4),
-                    Text(
-                      l10n.participants(state.totalParticipants),
-                      style: TextStyle(color: AppColors.textSecondary),
-                    ),
-                    const SizedBox(height: 16),
+                          const SizedBox(width: 8),
+                          _TimeChip(
+                            label: l10n.monthly,
+                            isSelected: state.timeRange == TimeRange.monthly,
+                            onTap: () => notifier.setTimeRange(TimeRange.monthly),
+                          ),
+                          const SizedBox(width: 8),
+                          _TimeChip(
+                            label: l10n.allTime,
+                            isSelected: state.timeRange == TimeRange.allTime,
+                            onTap: () => notifier.setTimeRange(TimeRange.allTime),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 16),
 
-                    Row(
-                      children: [
-                        _TimeChip(
-                          label: l10n.weekly,
-                          isSelected: state.timeRange == TimeRange.weekly,
-                          onTap: () => notifier.setTimeRange(TimeRange.weekly),
-                        ),
-                        const SizedBox(width: 8),
-                        _TimeChip(
-                          label: l10n.monthly,
-                          isSelected: state.timeRange == TimeRange.monthly,
-                          onTap: () => notifier.setTimeRange(TimeRange.monthly),
-                        ),
-                        const SizedBox(width: 8),
-                        _TimeChip(
-                          label: l10n.allTime,
-                          isSelected: state.timeRange == TimeRange.allTime,
-                          onTap: () => notifier.setTimeRange(TimeRange.allTime),
-                        ),
-                      ],
-                    ),
-                    const SizedBox(height: 16),
+                      if (state.currentUserEntry != null)
+                        _YourRankCard(entry: state.currentUserEntry!, l10n: l10n),
+                      const SizedBox(height: 16),
 
-                    if (state.currentUserEntry != null)
-                      _YourRankCard(entry: state.currentUserEntry!, l10n: l10n),
-                    const SizedBox(height: 16),
-
-                    if (top3.length >= 3) _Podium(entries: top3),
-                    const SizedBox(height: 24),
-                  ],
+                      if (top3.length >= 3) _Podium(entries: top3),
+                      const SizedBox(height: 24),
+                    ],
+                  ),
                 ),
               ),
-            ),
 
             SliverPadding(
               padding: const EdgeInsets.symmetric(horizontal: 20),
@@ -135,6 +139,7 @@ class LeaderboardScreen extends ConsumerWidget {
           ],
         ),
         ),
+        ),
       ),
     );
   }
@@ -148,80 +153,86 @@ class _YourRankCard extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.all(16),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(16),
-        gradient: LinearGradient(
-          colors: [
-            AppColors.primary.withValues(alpha: 0.2),
-            AppColors.primaryLight.withValues(alpha: 0.1),
-          ],
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
+    return GlowContainer(
+      glowColor: AppColors.primary,
+      borderRadius: 16,
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(16),
+          gradient: LinearGradient(
+            colors: [
+              AppColors.primary.withValues(alpha: 0.2),
+              AppColors.primaryLight.withValues(alpha: 0.1),
+            ],
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+          ),
+          border: Border.all(
+            color: AppColors.primary.withValues(alpha: 0.4),
+            width: 1.5,
+          ),
         ),
-        border: Border.all(
-          color: AppColors.primary.withValues(alpha: 0.4),
-          width: 1.5,
-        ),
-      ),
-      child: Row(
-        children: [
-          Container(
-            width: 40,
-            height: 40,
-            decoration: BoxDecoration(
-              color: AppColors.primary.withValues(alpha: 0.2),
-              shape: BoxShape.circle,
-            ),
-            child: Center(
-              child: Text(
-                '#${entry.rank}',
-                style: const TextStyle(
-                  fontWeight: FontWeight.bold,
-                  color: AppColors.primaryLight,
-                  fontSize: 13,
+        child: Row(
+          children: [
+            Container(
+              width: 40,
+              height: 40,
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.2),
+                shape: BoxShape.circle,
+              ),
+              child: Center(
+                child: AnimatedCounter(
+                  value: entry.rank,
+                  prefix: '#',
+                  style: const TextStyle(
+                    fontWeight: FontWeight.bold,
+                    color: AppColors.primaryLight,
+                    fontSize: 13,
+                  ),
                 ),
               ),
             ),
-          ),
-          const SizedBox(width: 12),
-          ProfileAvatar(
-            avatarUrl: entry.avatarUrl,
-            displayName: entry.displayName,
-            radius: 20,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  l10n.yourRank,
-                  style: const TextStyle(
-                    fontWeight: FontWeight.bold,
-                    fontSize: 14,
-                  ),
-                ),
-                Text(
-                  '${entry.displayName} \u2022 ${l10n.levelN(entry.level)}',
-                  style: const TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 12,
-                  ),
-                ),
-              ],
+            const SizedBox(width: 12),
+            ProfileAvatar(
+              avatarUrl: entry.avatarUrl,
+              displayName: entry.displayName,
+              radius: 20,
             ),
-          ),
-          Text(
-            '${entry.totalXp} XP',
-            style: const TextStyle(
-              color: AppColors.xpGreen,
-              fontWeight: FontWeight.bold,
-              fontSize: 14,
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    l10n.yourRank,
+                    style: const TextStyle(
+                      fontWeight: FontWeight.bold,
+                      fontSize: 14,
+                    ),
+                  ),
+                  Text(
+                    '${entry.displayName} \u2022 ${l10n.levelN(entry.level)}',
+                    style: const TextStyle(
+                      color: AppColors.textSecondary,
+                      fontSize: 12,
+                    ),
+                  ),
+                ],
+              ),
             ),
-          ),
-        ],
+            AnimatedCounter(
+              value: entry.totalXp,
+              suffix: ' XP',
+              style: const TextStyle(
+                color: AppColors.xpGreen,
+                fontWeight: FontWeight.bold,
+                fontSize: 14,
+              ),
+            ),
+          ],
+        ),
       ),
     ).animate().fadeIn(duration: 400.ms).slideX(begin: -0.05);
   }
@@ -260,13 +271,22 @@ class _Podium extends StatelessWidget {
     return Row(
       crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        Expanded(child: _PodiumSpot(entry: second, height: 100, color: AppColors.silver)),
+        Expanded(
+          child: _PodiumSpot(entry: second, height: 100, color: AppColors.silver)
+              .animate(delay: 200.ms).fadeIn(duration: 500.ms).slideY(begin: 0.3),
+        ),
         const SizedBox(width: 8),
-        Expanded(child: _PodiumSpot(entry: first, height: 130, color: AppColors.gold)),
+        Expanded(
+          child: _PodiumSpot(entry: first, height: 130, color: AppColors.gold)
+              .animate(delay: 400.ms).fadeIn(duration: 500.ms).slideY(begin: 0.3).scale(begin: const Offset(0.9, 0.9)),
+        ),
         const SizedBox(width: 8),
-        Expanded(child: _PodiumSpot(entry: third, height: 80, color: AppColors.bronze)),
+        Expanded(
+          child: _PodiumSpot(entry: third, height: 80, color: AppColors.bronze)
+              .animate(delay: 100.ms).fadeIn(duration: 500.ms).slideY(begin: 0.3),
+        ),
       ],
-    ).animate().fadeIn(duration: 600.ms).slideY(begin: 0.1);
+    );
   }
 }
 
@@ -289,23 +309,31 @@ class _PodiumSpot extends StatelessWidget {
         ),
         const SizedBox(height: 8),
         Text(entry.displayName, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 13)),
-        Text('${entry.totalXp} XP', style: const TextStyle(color: AppColors.textMuted, fontSize: 11)),
+        AnimatedCounter(
+          value: entry.totalXp,
+          suffix: ' XP',
+          style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+        ),
         Text(
           'Lv ${entry.level}',
           style: TextStyle(color: color, fontSize: 10, fontWeight: FontWeight.w600),
         ),
         const SizedBox(height: 6),
-        Container(
-          height: height,
-          decoration: BoxDecoration(
-            color: color.withValues(alpha: 0.2),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
-          ),
-          child: Center(
-            child: Icon(
-              isFirst ? LucideIcons.crown : LucideIcons.trophy,
-              color: color,
-              size: 24,
+        GlowContainer(
+          glowColor: color,
+          borderRadius: 12,
+          child: Container(
+            height: height,
+            decoration: BoxDecoration(
+              color: color.withValues(alpha: 0.2),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(12)),
+            ),
+            child: Center(
+              child: Icon(
+                isFirst ? LucideIcons.crown : LucideIcons.trophy,
+                color: color,
+                size: 24,
+              ),
             ),
           ),
         ),
@@ -321,55 +349,58 @@ class _RankTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Container(
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-      decoration: BoxDecoration(
-        color: entry.isCurrentUser
-            ? AppColors.primary.withValues(alpha: 0.15)
-            : AppColors.bgCard,
-        borderRadius: BorderRadius.circular(12),
-        border: entry.isCurrentUser
-            ? Border.all(color: AppColors.primary.withValues(alpha: 0.5))
-            : null,
-      ),
-      child: Row(
-        children: [
-          SizedBox(
-            width: 32,
-            child: Text(
-              '#${entry.rank}',
-              style: TextStyle(
-                fontWeight: FontWeight.bold,
-                color: entry.isCurrentUser ? AppColors.primary : AppColors.textSecondary,
+    return ScaleTap(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        decoration: BoxDecoration(
+          color: entry.isCurrentUser
+              ? AppColors.primary.withValues(alpha: 0.15)
+              : AppColors.bgCard,
+          borderRadius: BorderRadius.circular(12),
+          border: entry.isCurrentUser
+              ? Border.all(color: AppColors.primary.withValues(alpha: 0.5))
+              : null,
+        ),
+        child: Row(
+          children: [
+            SizedBox(
+              width: 32,
+              child: Text(
+                '#${entry.rank}',
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: entry.isCurrentUser ? AppColors.primary : AppColors.textSecondary,
+                ),
               ),
             ),
-          ),
-          ProfileAvatar(
-            avatarUrl: entry.avatarUrl,
-            displayName: entry.displayName,
-            radius: 18,
-          ),
-          const SizedBox(width: 12),
-          Expanded(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  entry.displayName,
-                  style: TextStyle(fontWeight: entry.isCurrentUser ? FontWeight.bold : FontWeight.w500),
-                ),
-                Text(
-                  'Lv ${entry.level}',
-                  style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-                ),
-              ],
+            ProfileAvatar(
+              avatarUrl: entry.avatarUrl,
+              displayName: entry.displayName,
+              radius: 18,
             ),
-          ),
-          Text(
-            '${entry.totalXp} XP',
-            style: const TextStyle(color: AppColors.xpGreen, fontWeight: FontWeight.bold, fontSize: 13),
-          ),
-        ],
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    entry.displayName,
+                    style: TextStyle(fontWeight: entry.isCurrentUser ? FontWeight.bold : FontWeight.w500),
+                  ),
+                  Text(
+                    'Lv ${entry.level}',
+                    style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
+                  ),
+                ],
+              ),
+            ),
+            AnimatedCounter(
+              value: entry.totalXp,
+              suffix: ' XP',
+              style: const TextStyle(color: AppColors.xpGreen, fontWeight: FontWeight.bold, fontSize: 13),
+            ),
+          ],
+        ),
       ),
     );
   }

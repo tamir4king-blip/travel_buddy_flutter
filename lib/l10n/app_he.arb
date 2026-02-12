@@ -193,6 +193,15 @@
   "retry": "נסה שוב",
   "rankN": "דירוג #{rank}",
 
+  "navSkills": "כישורים",
+  "locked": "נעול",
+  "requires": "דורש: {requirement}",
+  "relatedQuests": "משימות קשורות",
+  "viewQuests": "צפה במשימות",
+  "completedOfTotal": "{completed} מתוך {total} הושלמו",
+  "xpNeeded": "{xp} נק' ניסיון נדרשות",
+  "nSkills": "{count} כישורים",
+
   "english": "English",
   "hebrew": "עברית"
 }

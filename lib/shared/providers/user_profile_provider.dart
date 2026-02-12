@@ -2,12 +2,14 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:travel_buddy/shared/models/user_profile.dart';
 import 'package:travel_buddy/shared/providers/auth_provider.dart';
 import 'package:travel_buddy/shared/providers/persistence_provider.dart';
+import 'package:travel_buddy/shared/providers/profile_sync_provider.dart';
 
 class UserProfileNotifier extends StateNotifier<UserProfile> {
   final Ref ref;
 
   UserProfileNotifier(this.ref, UserProfile initial) : super(initial) {
     _loadFromPersistence();
+    _loadFromRemote();
   }
 
   void _loadFromPersistence() {
@@ -18,9 +20,50 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
     }
   }
 
-  void _persist() {
+  Future<void> _loadFromRemote() async {
+    try {
+      final syncService = ref.read(profileSyncServiceProvider);
+      if (syncService == null) return;
+
+      final remote = await syncService.loadProfileFromRemote();
+      if (remote == null) return;
+
+      // Merge: remote wins for text fields, higher value wins for XP/level
+      state = state.copyWith(
+        displayName: remote.displayName,
+        username: remote.username,
+        bio: remote.bio,
+        avatarUrl: remote.avatarUrl,
+        totalXp: remote.totalXp > state.totalXp ? remote.totalXp : null,
+        level: remote.level > state.level ? remote.level : null,
+        isPublic: remote.isPublic,
+        isPremium: remote.isPremium,
+      );
+      _persistLocally();
+    } catch (_) {
+      // Silently fail — local persistence is primary
+    }
+  }
+
+  void _persistLocally() {
     final persistence = ref.read(persistenceServiceProvider);
     persistence.saveUserProfile(state);
+  }
+
+  void _persist() {
+    _persistLocally();
+    _syncToRemote();
+  }
+
+  Future<void> _syncToRemote() async {
+    try {
+      final syncService = ref.read(profileSyncServiceProvider);
+      if (syncService == null) return;
+      // Fire-and-forget
+      syncService.syncProfileToRemote(state);
+    } catch (_) {
+      // Silently fail
+    }
   }
 
   void addXp(int amount) {

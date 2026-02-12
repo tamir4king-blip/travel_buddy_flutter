@@ -227,16 +227,106 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     _lastCompletedCollection = null;
   }
 
+  // ── Dev Panel Methods ──────────────────────────────────────────────────────
+
+  void forceUnlock(String id) {
+    final index = state.allAchievements.indexWhere((a) => a.id == id);
+    if (index == -1) return;
+    final achievement = state.allAchievements[index];
+    if (achievement.isUnlocked) return;
+
+    final unlocked = achievement.copyWith(
+      isUnlocked: true,
+      unlockedAt: DateTime.now(),
+    );
+    final updatedAll = [...state.allAchievements];
+    updatedAll[index] = unlocked;
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements: [...state.unlockedAchievements, unlocked],
+    );
+    ref.read(userProfileProvider.notifier).addXp(achievement.xpReward);
+    _persist();
+  }
+
+  void forceLock(String id) {
+    final index = state.allAchievements.indexWhere((a) => a.id == id);
+    if (index == -1) return;
+    final achievement = state.allAchievements[index];
+    if (!achievement.isUnlocked) return;
+
+    final locked = achievement.copyWith(
+      isUnlocked: false,
+      unlockedAt: null,
+    );
+    final updatedAll = [...state.allAchievements];
+    updatedAll[index] = locked;
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements:
+          state.unlockedAchievements.where((a) => a.id != id).toList(),
+    );
+    _persist();
+  }
+
+  void unlockAll() {
+    final now = DateTime.now();
+    final updatedAll = state.allAchievements.map((a) {
+      if (a.isUnlocked) return a;
+      return a.copyWith(isUnlocked: true, unlockedAt: now);
+    }).toList();
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements: updatedAll.where((a) => a.isUnlocked).toList(),
+    );
+    _persist();
+  }
+
+  void lockAll() {
+    final updatedAll = state.allAchievements.map((a) {
+      if (!a.isUnlocked) return a;
+      return a.copyWith(isUnlocked: false, unlockedAt: null);
+    }).toList();
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements: [],
+      completedCollections: {},
+    );
+    _persist();
+  }
+
+  void updateAchievementRadius(String id, double newRadius) {
+    final index = state.allAchievements.indexWhere((a) => a.id == id);
+    if (index == -1) return;
+
+    final updated = state.allAchievements[index].copyWith(claimRadius: newRadius);
+    final updatedAll = [...state.allAchievements];
+    updatedAll[index] = updated;
+
+    // Also update in unlocked list if present
+    final unlockedIndex = state.unlockedAchievements.indexWhere((a) => a.id == id);
+    final updatedUnlocked = [...state.unlockedAchievements];
+    if (unlockedIndex != -1) {
+      updatedUnlocked[unlockedIndex] = updated;
+    }
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements: updatedUnlocked,
+    );
+    _persist();
+  }
+
   int _collectionBonusXp(String collectionId) {
     const bonuses = {
-      'getting-started': 50,
-      'cities': 75,
-      'nature': 100,
-      'food-drink': 75,
-      'culture': 100,
-      'photography': 75,
-      'countries': 200,
-      'water-sports': 100,
+      'beaches': 75,
+      'landmarks': 100,
+      'parks': 100,
+      'culture': 75,
     };
     return bonuses[collectionId] ?? 50;
   }
@@ -247,160 +337,266 @@ final achievementsProvider =
   (ref) => AchievementsNotifier(ref),
 );
 
-// Placeholder registry — will be replaced with full data from React app
+// Netanya location-based achievements registry
 final achievementRegistry = <Achievement>[
+  // ── Landmarks ──
   Achievement(
-    id: 'first-steps',
-    title: 'First Steps',
-    description: 'Visit your first location',
+    id: 'tayelet-netanya',
+    title: 'The Netanya Promenade',
+    description: 'Walk along the famous clifftop promenade overlooking the Mediterranean',
     tier: AchievementTier.bronze,
     xpReward: 10,
-    latitude: 37.7749,
-    longitude: -122.4194,
+    latitude: 32.3282,
+    longitude: 34.8485,
+    claimRadius: 300,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'coastal'],
+  ),
+  Achievement(
+    id: 'kikar-haatzmaut',
+    title: 'Independence Square',
+    description: 'Visit the vibrant heart of Netanya at Independence Square',
+    tier: AchievementTier.bronze,
+    xpReward: 10,
+    latitude: 32.3290,
+    longitude: 34.8555,
+    claimRadius: 200,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'city-center'],
+  ),
+  Achievement(
+    id: 'glass-elevator',
+    title: 'The Glass Elevator',
+    description: 'Ride the panoramic glass elevator connecting the cliff to the beach',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3275,
+    longitude: 34.8487,
+    claimRadius: 150,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'scenic'],
+  ),
+  Achievement(
+    id: 'wingate-institute',
+    title: 'Wingate Institute',
+    description: 'Visit Israel\'s national center for physical education and sport',
+    tier: AchievementTier.platinum,
+    xpReward: 50,
+    latitude: 32.2780,
+    longitude: 34.8530,
+    claimRadius: 400,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'sports'],
+  ),
+  // ── Beaches ──
+  Achievement(
+    id: 'sironit-beach',
+    title: 'Sironit Beach',
+    description: 'Enjoy the popular Sironit Beach with its golden sands',
+    tier: AchievementTier.bronze,
+    xpReward: 10,
+    latitude: 32.3340,
+    longitude: 34.8470,
+    claimRadius: 300,
+    collectionId: 'beaches',
+    tags: ['beaches', 'swimming'],
+  ),
+  Achievement(
+    id: 'herzl-beach',
+    title: 'Herzl Beach',
+    description: 'Relax at Herzl Beach, one of Netanya\'s most beloved shores',
+    tier: AchievementTier.bronze,
+    xpReward: 10,
+    latitude: 32.3245,
+    longitude: 34.8475,
+    claimRadius: 300,
+    collectionId: 'beaches',
+    tags: ['beaches', 'swimming'],
+  ),
+  Achievement(
+    id: 'poleg-beach',
+    title: 'Poleg Beach',
+    description: 'Discover the scenic Poleg Beach at the southern edge of Netanya',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.2950,
+    longitude: 34.8420,
+    claimRadius: 400,
+    collectionId: 'beaches',
+    tags: ['beaches', 'nature'],
+  ),
+  Achievement(
+    id: 'blue-bay',
+    title: 'Blue Bay Beach',
+    description: 'Visit the beautiful Blue Bay Beach and its turquoise waters',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3140,
+    longitude: 34.8430,
+    claimRadius: 300,
+    collectionId: 'beaches',
+    tags: ['beaches', 'resort'],
+  ),
+  // ── Parks ──
+  Achievement(
+    id: 'nahal-alexander',
+    title: 'Alexander Stream Nature Reserve',
+    description: 'Explore the Alexander Stream where sea turtles nest',
+    tier: AchievementTier.gold,
+    xpReward: 35,
+    latitude: 32.3740,
+    longitude: 34.8640,
     claimRadius: 500,
-    collectionId: 'getting-started',
-    tags: ['starter'],
-    isUnlocked: true,
-    unlockedAt: DateTime(2025, 6, 15),
+    collectionId: 'parks',
+    tags: ['parks', 'nature', 'wildlife'],
   ),
   Achievement(
-    id: 'city-explorer',
-    title: 'City Explorer',
-    description: 'Visit 5 different cities',
+    id: 'gan-hamelech',
+    title: 'King\'s Garden & Amphitheatre',
+    description: 'Stroll through the King\'s Garden and its open-air amphitheatre',
     tier: AchievementTier.silver,
     xpReward: 20,
-    latitude: 34.0522,
-    longitude: -118.2437,
-    claimRadius: 700,
-    collectionId: 'cities',
-    tags: ['cities', 'exploration'],
-    isUnlocked: true,
+    latitude: 32.3290,
+    longitude: 34.8500,
+    claimRadius: 200,
+    collectionId: 'parks',
+    tags: ['parks', 'culture'],
   ),
   Achievement(
-    id: 'foodie',
-    title: 'Foodie',
-    description: 'Try local cuisine in 3 countries',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    collectionId: 'food-drink',
-    tags: ['food', 'culture'],
-    isUnlocked: true,
-  ),
-  Achievement(
-    id: 'mountain-conqueror',
-    title: 'Mountain Conqueror',
-    description: 'Reach a summit above 3000m',
-    tier: AchievementTier.platinum,
-    xpReward: 50,
-    latitude: 46.8523,
-    longitude: -121.7603,
-    claimRadius: 800,
-    collectionId: 'nature',
-    tags: ['hiking', 'extreme'],
-  ),
-  Achievement(
-    id: 'night-owl',
-    title: 'Night Owl',
-    description: 'Complete a quest after midnight',
+    id: 'utman-park',
+    title: 'Utman Garden Park',
+    description: 'Relax in the peaceful Utman Garden Park',
     tier: AchievementTier.bronze,
     xpReward: 10,
-    collectionId: 'getting-started',
-    tags: ['time-based'],
+    latitude: 32.3200,
+    longitude: 34.8600,
+    claimRadius: 250,
+    collectionId: 'parks',
+    tags: ['parks', 'relaxation'],
   ),
   Achievement(
-    id: 'photographer',
-    title: 'Photographer',
-    description: 'Upload 10 travel photos',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 40.7128,
-    longitude: -74.0060,
-    claimRadius: 600,
-    collectionId: 'photography',
-    tags: ['photography', 'creative'],
-  ),
-  Achievement(
-    id: 'globe-trotter',
-    title: 'Globe Trotter',
-    description: 'Visit 10 different countries',
-    tier: AchievementTier.platinum,
-    xpReward: 50,
-    collectionId: 'countries',
-    tags: ['countries', 'exploration'],
-  ),
-  Achievement(
-    id: 'sunrise-chaser',
-    title: 'Sunrise Chaser',
-    description: 'Watch a sunrise from a mountain peak',
+    id: 'ir-yamim',
+    title: 'Ir Yamim Park',
+    description: 'Explore the expansive Ir Yamim Park in south Netanya',
     tier: AchievementTier.gold,
     xpReward: 35,
-    collectionId: 'nature',
-    tags: ['nature', 'time-based'],
+    latitude: 32.2870,
+    longitude: 34.8480,
+    claimRadius: 350,
+    collectionId: 'parks',
+    tags: ['parks', 'recreation'],
+  ),
+  // ── North Netanya — Landmarks ──
+  Achievement(
+    id: 'umm-khalid-fortress',
+    title: 'Umm Khalid Fortress',
+    description: 'Explore the ancient Crusader fortress ruins overlooking the northern coastline',
+    tier: AchievementTier.gold,
+    xpReward: 35,
+    latitude: 32.3520,
+    longitude: 34.8490,
+    claimRadius: 250,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'history', 'ruins'],
   ),
   Achievement(
-    id: 'local-guide',
-    title: 'Local Guide',
-    description: 'Get a recommendation from a local resident',
+    id: 'north-promenade-lookout',
+    title: 'North Cliff Lookout',
+    description: 'Take in the panoramic sea view from the northern promenade lookout point',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3430,
+    longitude: 34.8475,
+    claimRadius: 200,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'scenic', 'coastal'],
+  ),
+  // ── North Netanya — Beaches ──
+  Achievement(
+    id: 'argaman-beach',
+    title: 'Argaman Beach',
+    description: 'Discover the quiet Argaman Beach in northern Netanya, perfect for sunset walks',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3460,
+    longitude: 34.8460,
+    claimRadius: 300,
+    collectionId: 'beaches',
+    tags: ['beaches', 'quiet', 'sunset'],
+  ),
+  Achievement(
+    id: 'tzofit-beach',
+    title: 'Tzofit Beach',
+    description: 'Visit the scenic Tzofit Beach nestled beneath the northern cliffs',
     tier: AchievementTier.bronze,
     xpReward: 10,
-    collectionId: 'culture',
-    tags: ['culture', 'social'],
+    latitude: 32.3390,
+    longitude: 34.8465,
+    claimRadius: 300,
+    collectionId: 'beaches',
+    tags: ['beaches', 'cliffs', 'nature'],
   ),
+  // ── North Netanya — Parks ──
   Achievement(
-    id: 'market-master',
-    title: 'Market Master',
-    description: 'Visit 5 local markets',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    collectionId: 'food-drink',
-    tags: ['food', 'shopping'],
-  ),
-  Achievement(
-    id: 'deep-diver',
-    title: 'Deep Diver',
-    description: 'Go scuba diving or snorkeling',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    collectionId: 'water-sports',
-    tags: ['water', 'extreme'],
-  ),
-  Achievement(
-    id: 'history-buff',
-    title: 'History Buff',
-    description: 'Visit 10 historical sites',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 51.5007,
-    longitude: -0.1246,
-    claimRadius: 700,
-    collectionId: 'culture',
-    tags: ['history', 'culture'],
-  ),
-  Achievement(
-    id: 'polyglot',
-    title: 'Polyglot',
-    description: 'Learn a phrase in 5 different languages',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    collectionId: 'culture',
-    tags: ['language', 'culture'],
-  ),
-  Achievement(
-    id: 'island-hopper',
-    title: 'Island Hopper',
-    description: 'Visit 3 different islands',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    collectionId: 'nature',
-    tags: ['islands', 'exploration'],
-  ),
-  Achievement(
-    id: 'campfire-stories',
-    title: 'Campfire Stories',
-    description: 'Camp overnight in the wilderness',
+    id: 'park-raanana-junction',
+    title: 'Arison Park North',
+    description: 'Stroll through the green Arison Park on the northern edge of Netanya',
     tier: AchievementTier.bronze,
     xpReward: 10,
-    collectionId: 'nature',
-    tags: ['camping', 'nature'],
+    latitude: 32.3500,
+    longitude: 34.8580,
+    claimRadius: 300,
+    collectionId: 'parks',
+    tags: ['parks', 'nature', 'walking'],
+  ),
+  // ── North Netanya — Culture ──
+  Achievement(
+    id: 'well-museum',
+    title: 'The Well House Museum',
+    description: 'Visit the historic Well House Museum documenting the founding of Netanya',
+    tier: AchievementTier.gold,
+    xpReward: 35,
+    latitude: 32.3380,
+    longitude: 34.8560,
+    claimRadius: 200,
+    collectionId: 'culture',
+    tags: ['culture', 'history', 'museum'],
+  ),
+  // ── Culture ──
+  Achievement(
+    id: 'netanya-market',
+    title: 'The Netanya Market',
+    description: 'Browse the bustling Netanya Market for fresh produce and local flavors',
+    tier: AchievementTier.gold,
+    xpReward: 35,
+    latitude: 32.3310,
+    longitude: 34.8570,
+    claimRadius: 200,
+    collectionId: 'culture',
+    tags: ['culture', 'food', 'shopping'],
+  ),
+  Achievement(
+    id: 'beit-haedut',
+    title: 'Beit HaEdut Museum',
+    description: 'Discover the history of immigration at the Beit HaEdut Museum',
+    tier: AchievementTier.gold,
+    xpReward: 35,
+    latitude: 32.3290,
+    longitude: 34.8545,
+    claimRadius: 150,
+    collectionId: 'culture',
+    tags: ['culture', 'history', 'museum'],
+  ),
+  Achievement(
+    id: 'hasharon-mall',
+    title: 'HaSharon Mall',
+    description: 'Visit the HaSharon Mall, a major shopping and entertainment hub',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3170,
+    longitude: 34.8640,
+    claimRadius: 300,
+    collectionId: 'culture',
+    tags: ['culture', 'shopping', 'entertainment'],
   ),
 ];

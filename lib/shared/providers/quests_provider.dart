@@ -77,24 +77,15 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
     final savedSkillXp = persistence.loadSkillXp();
     final streakData = persistence.loadStreakData();
 
-    // Default skill XP values (demo data)
-    final defaultSkillXp = <String, int>{
-      'hiker': 620, 'camper': 180, 'angler': 240, 'naturalist': 150,
-      'stargazer': 80, 'gardener': 50, 'diver': 320, 'surfer': 180,
-      'sailor': 100, 'kayaker': 220, 'swimmer': 150, 'skydiver': 50,
-      'climber': 180, 'skier': 240, 'snowboarder': 120, 'paraglider': 80,
-      'runner': 200, 'biker': 180, 'yogi': 320, 'martial': 100,
-      'chef': 290, 'baker': 150, 'grillmaster': 180, 'sommelier': 100,
-      'barista': 250, 'mixologist': 120, 'foodie': 380, 'historian': 200,
-      'artist': 120, 'musician': 80, 'linguist': 200, 'partygoer': 150,
-      'dancer': 100, 'socialite': 280, 'volunteer': 180, 'photographer': 510,
-      'explorer': 350, 'shopper': 180, 'nomad': 90, 'backpacker': 260,
-      'roadtripper': 210, 'pilot': 50, 'festival': 120, 'sunset': 200,
-      'aurora': 30,
-    };
+    // Use saved skill XP if available, otherwise start empty
+    // Skills are earned by completing quests — no fake data
+    final skillXp = savedSkillXp;
 
-    // Use saved skill XP if available, otherwise default
-    final skillXp = savedSkillXp.isNotEmpty ? savedSkillXp : defaultSkillXp;
+    // Calculate skill levels from XP
+    final skillLevels = <String, int>{};
+    for (final entry in skillXp.entries) {
+      skillLevels[entry.key] = _calculateSkillLevel(entry.value);
+    }
 
     // Merge saved completions onto quest registry
     final mergedQuests = questRegistry.map((q) {
@@ -108,15 +99,13 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
       return q;
     }).toList();
 
-    // Use saved streak if available, otherwise default to 5 for demo
-    final streak = streakData.currentStreak > 0
-        ? streakData.currentStreak
-        : (savedCompletions.isEmpty ? 5 : 0);
+    // Use saved streak if available, otherwise start at 0
+    final streak = streakData.currentStreak;
 
     state = QuestsState(
       allQuests: mergedQuests,
       skillXp: skillXp,
-      skillLevels: const {},
+      skillLevels: skillLevels,
       currentStreak: streak,
       lastCompletionDate: streakData.lastCompletionDate,
     );
@@ -226,6 +215,85 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
 
     _persist();
     return true;
+  }
+
+  // ── Dev Panel Methods ──────────────────────────────────────────────────────
+
+  void forceCompleteQuest(String id) {
+    final index = state.allQuests.indexWhere((q) => q.id == id);
+    if (index == -1) return;
+    final quest = state.allQuests[index];
+    if (quest.isCompleted) return;
+
+    final completed = quest.copyWith(
+      completionCount: 1,
+      isCompleted: true,
+    );
+    final updatedQuests = [...state.allQuests];
+    updatedQuests[index] = completed;
+
+    // Update skill XP
+    final updatedSkillXp = Map<String, int>.from(state.skillXp);
+    final currentSkillXp = updatedSkillXp[quest.skillType] ?? 0;
+    updatedSkillXp[quest.skillType] = currentSkillXp + quest.xpReward;
+
+    final updatedSkillLevels = Map<String, int>.from(state.skillLevels);
+    updatedSkillLevels[quest.skillType] =
+        _calculateSkillLevel(updatedSkillXp[quest.skillType]!);
+
+    state = state.copyWith(
+      allQuests: updatedQuests,
+      skillXp: updatedSkillXp,
+      skillLevels: updatedSkillLevels,
+    );
+
+    ref.read(userProfileProvider.notifier).addXp(quest.xpReward);
+    _persist();
+  }
+
+  void uncompleteQuest(String id) {
+    final index = state.allQuests.indexWhere((q) => q.id == id);
+    if (index == -1) return;
+    final quest = state.allQuests[index];
+    if (!quest.isCompleted) return;
+
+    final reset = quest.copyWith(
+      completionCount: 0,
+      isCompleted: false,
+    );
+    final updatedQuests = [...state.allQuests];
+    updatedQuests[index] = reset;
+
+    // Remove skill XP that was awarded
+    final updatedSkillXp = Map<String, int>.from(state.skillXp);
+    final currentSkillXp = updatedSkillXp[quest.skillType] ?? 0;
+    updatedSkillXp[quest.skillType] = (currentSkillXp - quest.xpReward).clamp(0, currentSkillXp);
+
+    final updatedSkillLevels = Map<String, int>.from(state.skillLevels);
+    updatedSkillLevels[quest.skillType] =
+        _calculateSkillLevel(updatedSkillXp[quest.skillType]!);
+
+    state = state.copyWith(
+      allQuests: updatedQuests,
+      skillXp: updatedSkillXp,
+      skillLevels: updatedSkillLevels,
+    );
+    _persist();
+  }
+
+  void resetAllQuests() {
+    final resetQuests = state.allQuests.map((q) {
+      if (!q.isCompleted) return q;
+      return q.copyWith(completionCount: 0, isCompleted: false);
+    }).toList();
+
+    state = state.copyWith(
+      allQuests: resetQuests,
+      skillXp: {},
+      skillLevels: {},
+      currentStreak: 0,
+    );
+    _persist();
   }
 
   int _calculateQuestXp(int baseXp, int completionCount) {

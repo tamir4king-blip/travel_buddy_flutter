@@ -6,10 +6,9 @@ import 'package:flutter_gen/gen_l10n/app_localizations.dart';
 import 'package:travel_buddy/core/theme/app_theme.dart';
 import 'package:travel_buddy/l10n/registry_l10n.dart';
 import 'package:travel_buddy/shared/models/side_quest.dart';
-import 'package:travel_buddy/shared/models/skill_group.dart';
 import 'package:travel_buddy/shared/providers/quests_provider.dart';
-import 'package:travel_buddy/shared/providers/skills_provider.dart';
 import 'package:travel_buddy/shared/widgets/responsive_layout.dart';
+import 'package:travel_buddy/shared/widgets/visual_extras.dart';
 
 class QuestsScreen extends ConsumerStatefulWidget {
   const QuestsScreen({super.key});
@@ -19,30 +18,34 @@ class QuestsScreen extends ConsumerStatefulWidget {
 }
 
 class _QuestsScreenState extends ConsumerState<QuestsScreen> {
-  String? _activeSkillId;
-
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(questsProvider);
     final notifier = ref.read(questsProvider.notifier);
-    final skillsState = ref.watch(skillsProvider);
 
-    final activeSkill = _activeSkillId == null || skillsState.allSkills.isEmpty
-        ? null
-        : skillsState.allSkills.firstWhere(
-            (s) => s.id == _activeSkillId,
-            orElse: () => skillsState.allSkills.first,
-          );
+    final filtered = state.filteredQuests;
 
-    final filtered = state.filteredQuests.where((quest) {
-      if (activeSkill == null) return true;
-      return activeSkill.categories.contains(quest.category);
-    }).toList();
+    // Sort: unlocked quests first, then locked quests
+    final sorted = List<SideQuest>.from(filtered)..sort((a, b) {
+      final aUnlocked = a.isUnlocked(
+        skillLevels: state.skillLevels,
+        allQuests: state.allQuests,
+      );
+      final bUnlocked = b.isUnlocked(
+        skillLevels: state.skillLevels,
+        allQuests: state.allQuests,
+      );
+      if (aUnlocked && !bUnlocked) return -1;
+      if (!aUnlocked && bUnlocked) return 1;
+      return 0;
+    });
 
     return SafeArea(
       child: ResponsiveLayout(
-        child: CustomScrollView(
+        child: AnimatedBackground(
+          accentColor: AppColors.primary,
+          child: CustomScrollView(
           slivers: [
             SliverToBoxAdapter(
               child: Padding(
@@ -50,58 +53,26 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
               child: Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Row(
-                    children: [
-                      Text(
-                        l10n.sideQuests,
-                        style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                              fontWeight: FontWeight.bold,
-                            ),
-                      ),
-                      const Spacer(),
-                      if (_activeSkillId != null)
-                        TextButton.icon(
-                          onPressed: () => setState(() => _activeSkillId = null),
-                          icon: const Icon(LucideIcons.x, size: 16),
-                          label: Text(l10n.clear),
+                  GradientText(
+                    text: l10n.sideQuests,
+                    style: Theme.of(context).textTheme.headlineMedium?.copyWith(
+                          fontWeight: FontWeight.bold,
                         ),
-                    ],
+                    gradient: AppGradients.gradientPrimary,
                   ),
                   const SizedBox(height: 4),
-                  Text(
-                    '${l10n.completedCount(state.completedCount)}  •  ${l10n.dayStreak(state.currentStreak)}',
-                    style: TextStyle(color: AppColors.textSecondary),
-                  ),
-                  const SizedBox(height: 20),
-
-                  Text(
-                    l10n.skills,
-                    style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                          fontWeight: FontWeight.w700,
-                        ),
-                  ),
-                  const SizedBox(height: 12),
-                  SizedBox(
-                    height: 120,
-                    child: ListView.separated(
-                      scrollDirection: Axis.horizontal,
-                      itemCount: skillsState.allSkills.length,
-                      separatorBuilder: (_, __) => const SizedBox(width: 12),
-                      itemBuilder: (context, index) {
-                        final skill = skillsState.allSkills[index];
-                        final skillXp = state.skillXp[skill.id] ?? 0;
-                        final level = _levelForSkill(skill, skillXp);
-                        final progress = _progressForSkill(skill, skillXp);
-                        final isActive = _activeSkillId == skill.id;
-                        return _SkillCard(
-                          skill: skill,
-                          level: level,
-                          progress: progress,
-                          isActive: isActive,
-                          onTap: () => setState(() => _activeSkillId = skill.id),
-                        );
-                      },
-                    ),
+                  Row(
+                    children: [
+                      AnimatedCounter(
+                        value: state.completedCount,
+                        style: TextStyle(color: AppColors.textSecondary),
+                        suffix: ' ${state.completedCount == 1 ? "quest" : "quests"}',
+                      ),
+                      Text(
+                        '  \u2022  ${l10n.dayStreak(state.currentStreak)}',
+                        style: TextStyle(color: AppColors.textSecondary),
+                      ),
+                    ],
                   ),
                   const SizedBox(height: 20),
 
@@ -165,14 +136,24 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
           SliverPadding(
             padding: const EdgeInsets.symmetric(horizontal: 20),
             sliver: SliverList.separated(
-              itemCount: filtered.length,
+              itemCount: sorted.length,
               separatorBuilder: (_, __) => const SizedBox(height: 12),
               itemBuilder: (context, index) {
-                final quest = filtered[index];
+                final quest = sorted[index];
+                final isLocked = !quest.isUnlocked(
+                  skillLevels: state.skillLevels,
+                  allQuests: state.allQuests,
+                );
+                final requirementText = isLocked
+                    ? _buildRequirementText(quest, state.allQuests, l10n)
+                    : null;
                 return _QuestCard(
                   quest: quest,
+                  isLocked: isLocked,
+                  requirementText: requirementText,
                   onComplete: () => notifier.completeQuest(quest.id),
-                  onDetails: () => _showQuestDetails(context, quest, notifier),
+                  onDetails: () => _showQuestDetails(
+                      context, quest, notifier, isLocked, requirementText),
                 )
                     .animate()
                     .fadeIn(duration: 400.ms, delay: (index * 80).ms)
@@ -184,23 +165,37 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
         ],
       ),
       ),
+      ),
     );
   }
 
-  int _levelForSkill(SkillGroup skill, int xp) {
-    final level = (xp / skill.xpPerLevel).floor() + 1;
-    return level.clamp(1, skill.maxLevel);
-  }
-
-  double _progressForSkill(SkillGroup skill, int xp) {
-    if (skill.xpPerLevel == 0) return 0;
-    return (xp % skill.xpPerLevel) / skill.xpPerLevel;
+  String _buildRequirementText(
+    SideQuest quest,
+    List<SideQuest> allQuests,
+    AppLocalizations l10n,
+  ) {
+    final parts = <String>[];
+    if (quest.requiredSkillType != null && quest.requiredSkillLevel != null) {
+      final skillName = quest.requiredSkillType!;
+      final capitalName = skillName[0].toUpperCase() + skillName.substring(1);
+      parts.add('$capitalName ${l10n.lvN(quest.requiredSkillLevel!)}');
+    }
+    for (final reqId in quest.requiredQuestIds) {
+      final reqQuest = allQuests.where((q) => q.id == reqId).firstOrNull;
+      if (reqQuest != null && !reqQuest.isCompleted) {
+        final locale = Localizations.localeOf(context);
+        parts.add(RegistryL10n.questTitle(locale, reqQuest.id, reqQuest.title));
+      }
+    }
+    return parts.join(' + ');
   }
 
   void _showQuestDetails(
     BuildContext context,
     SideQuest quest,
     QuestsNotifier notifier,
+    bool isLocked,
+    String? requirementText,
   ) {
     showModalBottomSheet(
       context: context,
@@ -210,6 +205,8 @@ class _QuestsScreenState extends ConsumerState<QuestsScreen> {
       ),
       builder: (_) => _QuestDetailSheet(
         quest: quest,
+        isLocked: isLocked,
+        requirementText: requirementText,
         onComplete: () {
           Navigator.of(context).pop();
           notifier.completeQuest(quest.id);
@@ -236,18 +233,45 @@ class _CategoryChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return Padding(
       padding: const EdgeInsetsDirectional.only(end: 8),
-      child: FilterChip(
-        label: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Icon(icon, size: 14),
-            const SizedBox(width: 6),
-            Text(label),
-          ],
+      child: ScaleTap(
+        onTap: onTap,
+        child: AnimatedContainer(
+          duration: const Duration(milliseconds: 200),
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+          decoration: BoxDecoration(
+            gradient: isSelected
+                ? LinearGradient(
+                    colors: [
+                      AppColors.primary.withValues(alpha: 0.25),
+                      AppColors.primary.withValues(alpha: 0.1),
+                    ],
+                  )
+                : null,
+            color: isSelected ? null : AppColors.bgCard,
+            borderRadius: BorderRadius.circular(12),
+            border: Border.all(
+              color: isSelected
+                  ? AppColors.primary.withValues(alpha: 0.5)
+                  : AppColors.bgCardLight.withValues(alpha: 0.5),
+              width: isSelected ? 1.5 : 1,
+            ),
+          ),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              Icon(icon, size: 14, color: isSelected ? AppColors.primaryLight : AppColors.textMuted),
+              const SizedBox(width: 6),
+              Text(
+                label,
+                style: TextStyle(
+                  color: isSelected ? AppColors.primaryLight : AppColors.textSecondary,
+                  fontWeight: isSelected ? FontWeight.w700 : FontWeight.w500,
+                  fontSize: 13,
+                ),
+              ),
+            ],
+          ),
         ),
-        selected: isSelected,
-        onSelected: (_) => onTap(),
-        selectedColor: AppColors.primary.withValues(alpha: 0.3),
       ),
     );
   }
@@ -255,11 +279,15 @@ class _CategoryChip extends StatelessWidget {
 
 class _QuestCard extends StatelessWidget {
   final SideQuest quest;
+  final bool isLocked;
+  final String? requirementText;
   final VoidCallback onComplete;
   final VoidCallback onDetails;
 
   const _QuestCard({
     required this.quest,
+    this.isLocked = false,
+    this.requirementText,
     required this.onComplete,
     required this.onDetails,
   });
@@ -294,223 +322,216 @@ class _QuestCard extends StatelessWidget {
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
     final locale = Localizations.localeOf(context);
-    final canComplete = !quest.isCompleted ||
-        (quest.isRepeatable && quest.completionCount < quest.maxCompletions);
+    final canComplete = !isLocked &&
+        (!quest.isCompleted ||
+            (quest.isRepeatable &&
+                quest.completionCount < quest.maxCompletions));
     final isRtl = Directionality.of(context) == TextDirection.rtl;
+    final isLegendary = quest.difficulty == QuestDifficulty.legendary;
 
-    return GestureDetector(
-      onTap: onDetails,
-      child: Container(
-        padding: const EdgeInsets.all(16),
-        decoration: BoxDecoration(
-          color: AppColors.bgCard,
-          borderRadius: BorderRadius.circular(14),
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.all(10),
-                  decoration: BoxDecoration(
-                    color: AppColors.primary.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Icon(_categoryIcon, color: AppColors.primary, size: 22),
-                ),
-                const SizedBox(width: 14),
-                Expanded(
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        RegistryL10n.questTitle(locale, quest.id, quest.title),
-                        style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 15),
-                      ),
-                      const SizedBox(height: 2),
-                      Text(
-                        RegistryL10n.questDescription(locale, quest.id, quest.description),
-                        style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
-                        maxLines: 2,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ],
-                  ),
-                ),
-                Icon(
-                  isRtl ? LucideIcons.chevronLeft : LucideIcons.chevronRight,
-                  size: 18,
-                  color: AppColors.textMuted,
-                ),
-              ],
-            ),
-            const SizedBox(height: 12),
-            Row(
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: _difficultyColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    _difficultyLabel(l10n),
-                    style: TextStyle(
-                      color: _difficultyColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w600,
+    Widget cardContent = Container(
+          padding: const EdgeInsets.all(16),
+          decoration: BoxDecoration(
+            color: AppColors.bgCard,
+            borderRadius: BorderRadius.circular(14),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  Container(
+                    padding: const EdgeInsets.all(10),
+                    decoration: BoxDecoration(
+                      color: isLocked
+                          ? AppColors.textMuted.withValues(alpha: 0.15)
+                          : AppColors.primary.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(12),
+                    ),
+                    child: Icon(
+                      isLocked ? LucideIcons.lock : _categoryIcon,
+                      color: isLocked ? AppColors.textMuted : AppColors.primary,
+                      size: 22,
                     ),
                   ),
-                ),
-                const SizedBox(width: 8),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
-                  decoration: BoxDecoration(
-                    color: AppColors.xpGreen.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(6),
-                  ),
-                  child: Text(
-                    '+${quest.xpReward} XP',
-                    style: const TextStyle(
-                      color: AppColors.xpGreen,
-                      fontSize: 11,
-                      fontWeight: FontWeight.bold,
+                  const SizedBox(width: 14),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          RegistryL10n.questTitle(
+                              locale, quest.id, quest.title),
+                          style: const TextStyle(
+                              fontWeight: FontWeight.w600, fontSize: 15),
+                        ),
+                        const SizedBox(height: 2),
+                        Text(
+                          RegistryL10n.questDescription(
+                              locale, quest.id, quest.description),
+                          style: const TextStyle(
+                              color: AppColors.textMuted, fontSize: 13),
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                        ),
+                      ],
                     ),
                   ),
-                ),
-                if (quest.isRepeatable) ...[
-                  const SizedBox(width: 8),
-                  Row(
-                    children: [
-                      Icon(LucideIcons.repeat, size: 14, color: AppColors.textMuted),
-                      const SizedBox(width: 4),
-                      Text(
-                        '${quest.completionCount}/${quest.maxCompletions}',
-                        style: const TextStyle(color: AppColors.textMuted, fontSize: 11),
-                      ),
-                    ],
+                  Icon(
+                    isRtl ? LucideIcons.chevronLeft : LucideIcons.chevronRight,
+                    size: 18,
+                    color: AppColors.textMuted,
                   ),
                 ],
-                const Spacer(),
-                if (quest.isCompleted && !canComplete)
-                  const Icon(LucideIcons.checkCircle, size: 20, color: AppColors.success)
-                else
-                  GestureDetector(
-                  onTap: canComplete ? onComplete : null,
-                  child: Container(
-                    padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 6),
+              ),
+              const SizedBox(height: 12),
+              Row(
+                children: [
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
                     decoration: BoxDecoration(
-                        color: canComplete ? AppColors.primary : AppColors.bgCardLight,
-                        borderRadius: BorderRadius.circular(8),
+                      color: _difficultyColor.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      _difficultyLabel(l10n),
+                      style: TextStyle(
+                        color: _difficultyColor,
+                        fontSize: 11,
+                        fontWeight: FontWeight.w600,
                       ),
-                      child: Text(
-                        quest.isCompleted ? l10n.repeat : l10n.start,
-                        style: TextStyle(
-                          color: canComplete ? Colors.white : AppColors.textMuted,
-                          fontSize: 12,
-                          fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(width: 8),
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                    decoration: BoxDecoration(
+                      color: AppColors.xpGreen.withValues(alpha: 0.15),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      '+${quest.xpReward} XP',
+                      style: const TextStyle(
+                        color: AppColors.xpGreen,
+                        fontSize: 11,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ),
+                  if (quest.isRepeatable && !isLocked) ...[
+                    const SizedBox(width: 8),
+                    Row(
+                      children: [
+                        Icon(LucideIcons.repeat,
+                            size: 14, color: AppColors.textMuted),
+                        const SizedBox(width: 4),
+                        Text(
+                          '${quest.completionCount}/${quest.maxCompletions}',
+                          style: const TextStyle(
+                              color: AppColors.textMuted, fontSize: 11),
+                        ),
+                      ],
+                    ),
+                  ],
+                  const Spacer(),
+                  if (isLocked && requirementText != null)
+                    Flexible(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 8, vertical: 3),
+                        decoration: BoxDecoration(
+                          color: AppColors.warning.withValues(alpha: 0.15),
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            const Icon(LucideIcons.lock,
+                                size: 10, color: AppColors.warning),
+                            const SizedBox(width: 4),
+                            Flexible(
+                              child: Text(
+                                l10n.requires(requirementText!),
+                                style: const TextStyle(
+                                  color: AppColors.warning,
+                                  fontSize: 10,
+                                  fontWeight: FontWeight.w600,
+                                ),
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                    )
+                  else if (quest.isCompleted && !canComplete)
+                    const Icon(LucideIcons.checkCircle,
+                        size: 20, color: AppColors.success)
+                  else if (!isLocked)
+                    GestureDetector(
+                      onTap: canComplete ? onComplete : null,
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                            horizontal: 14, vertical: 6),
+                        decoration: BoxDecoration(
+                          color: canComplete
+                              ? AppColors.primary
+                              : AppColors.bgCardLight,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          quest.isCompleted ? l10n.repeat : l10n.start,
+                          style: TextStyle(
+                            color: canComplete
+                                ? Colors.white
+                                : AppColors.textMuted,
+                            fontSize: 12,
+                            fontWeight: FontWeight.w600,
+                          ),
                         ),
                       ),
                     ),
-                  ),
-              ],
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-}
-
-class _SkillCard extends StatelessWidget {
-  final SkillGroup skill;
-  final int level;
-  final double progress;
-  final bool isActive;
-  final VoidCallback onTap;
-
-  const _SkillCard({
-    required this.skill,
-    required this.level,
-    required this.progress,
-    required this.isActive,
-    required this.onTap,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    final l10n = AppLocalizations.of(context)!;
-    final gradient = LinearGradient(
-      colors: [
-        _parseColor(skill.gradientStart),
-        _parseColor(skill.gradientEnd),
-      ],
-      begin: Alignment.topLeft,
-      end: Alignment.bottomRight,
-    );
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        width: 150,
-        padding: const EdgeInsets.all(12),
-        decoration: BoxDecoration(
-          gradient: gradient,
-          borderRadius: BorderRadius.circular(16),
-          border: isActive ? Border.all(color: Colors.white, width: 1.4) : null,
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.2),
-              blurRadius: 10,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            Text(skill.icon, style: const TextStyle(fontSize: 20)),
-            const SizedBox(height: 6),
-            Text(
-              RegistryL10n.skillName(Localizations.localeOf(context), skill.id, skill.name),
-              style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold),
-            ),
-            Text(
-              l10n.lvN(level),
-              style: TextStyle(color: Colors.white.withValues(alpha: 0.8), fontSize: 12),
-            ),
-            const Spacer(),
-            ClipRRect(
-              borderRadius: BorderRadius.circular(999),
-              child: LinearProgressIndicator(
-                value: progress,
-                minHeight: 6,
-                backgroundColor: Colors.white.withValues(alpha: 0.2),
-                valueColor: const AlwaysStoppedAnimation<Color>(Colors.white),
+                ],
               ),
-            ),
-          ],
-        ),
-      ),
-    );
-  }
+            ],
+          ),
+        );
 
-  Color _parseColor(String hex) {
-    final value = hex.replaceAll('#', '');
-    return Color(int.parse('FF$value', radix: 16));
+    if (isLocked) {
+      cardContent = ShimmerOverlay(child: Opacity(opacity: 0.6, child: cardContent));
+    } else if (isLegendary) {
+      cardContent = GlowContainer(
+        glowColor: AppColors.platinum,
+        borderRadius: 14,
+        child: cardContent,
+      );
+    }
+
+    return ScaleTap(
+      onTap: onDetails,
+      child: cardContent,
+    );
   }
 }
 
 class _QuestDetailSheet extends StatelessWidget {
   final SideQuest quest;
+  final bool isLocked;
+  final String? requirementText;
   final VoidCallback onComplete;
 
   const _QuestDetailSheet({
     required this.quest,
+    this.isLocked = false,
+    this.requirementText,
     required this.onComplete,
   });
 
-  String _verificationLabel(AppLocalizations l10n) => switch (quest.verification) {
+  String _verificationLabel(AppLocalizations l10n) =>
+      switch (quest.verification) {
         VerificationMethod.photo => l10n.verificationPhoto,
         VerificationMethod.location => l10n.verificationLocation,
         VerificationMethod.timeBased => l10n.verificationTime,
@@ -527,8 +548,10 @@ class _QuestDetailSheet extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     final l10n = AppLocalizations.of(context)!;
-    final canComplete = !quest.isCompleted ||
-        (quest.isRepeatable && quest.completionCount < quest.maxCompletions);
+    final canComplete = !isLocked &&
+        (!quest.isCompleted ||
+            (quest.isRepeatable &&
+                quest.completionCount < quest.maxCompletions));
     return Padding(
       padding: const EdgeInsets.fromLTRB(20, 12, 20, 24),
       child: Column(
@@ -546,16 +569,30 @@ class _QuestDetailSheet extends StatelessWidget {
             ),
           ),
           const SizedBox(height: 16),
-          Text(
-            RegistryL10n.questTitle(Localizations.localeOf(context), quest.id, quest.title),
-            style: Theme.of(context).textTheme.titleLarge?.copyWith(
-                  fontWeight: FontWeight.bold,
+          Row(
+            children: [
+              if (isLocked) ...[
+                const Icon(LucideIcons.lock,
+                    size: 20, color: AppColors.warning),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  RegistryL10n.questTitle(
+                      Localizations.localeOf(context), quest.id, quest.title),
+                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                        fontWeight: FontWeight.bold,
+                      ),
                 ),
+              ),
+            ],
           ),
           const SizedBox(height: 8),
           Text(
-            RegistryL10n.questDescription(Localizations.localeOf(context), quest.id, quest.description),
-            style: const TextStyle(color: AppColors.textSecondary, height: 1.3),
+            RegistryL10n.questDescription(
+                Localizations.localeOf(context), quest.id, quest.description),
+            style:
+                const TextStyle(color: AppColors.textSecondary, height: 1.3),
           ),
           const SizedBox(height: 16),
           Wrap(
@@ -573,19 +610,32 @@ class _QuestDetailSheet extends StatelessWidget {
               if (quest.isRepeatable)
                 _DetailPill(
                   icon: LucideIcons.repeat,
-                  label: '${quest.completionCount}/${quest.maxCompletions}',
+                  label:
+                      '${quest.completionCount}/${quest.maxCompletions}',
+                ),
+              if (isLocked && requirementText != null)
+                _DetailPill(
+                  icon: LucideIcons.lock,
+                  label: l10n.requires(requirementText!),
                 ),
             ],
           ),
           const SizedBox(height: 20),
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton(
-              onPressed: canComplete ? onComplete : null,
-              child: Text(
-                quest.isCompleted ? l10n.completeAgain : l10n.completeQuest,
-              ),
-            ),
+            child: isLocked
+                ? ElevatedButton(
+                    onPressed: null,
+                    child: Text(l10n.locked),
+                  )
+                : ElevatedButton(
+                    onPressed: canComplete ? onComplete : null,
+                    child: Text(
+                      quest.isCompleted
+                          ? l10n.completeAgain
+                          : l10n.completeQuest,
+                    ),
+                  ),
           ),
         ],
       ),
@@ -614,7 +664,8 @@ class _DetailPill extends StatelessWidget {
           const SizedBox(width: 6),
           Text(
             label,
-            style: const TextStyle(color: AppColors.textSecondary, fontSize: 12),
+            style: const TextStyle(
+                color: AppColors.textSecondary, fontSize: 12),
           ),
         ],
       ),

@@ -136,14 +136,14 @@ class LeaderboardNotifier extends StateNotifier<LeaderboardState> {
       ));
     }
 
-    // If current user is not in the top N, append them
-    if (!foundCurrentUser && userRank != null) {
+    // Always ensure the current user appears, even if not in the query results
+    if (!foundCurrentUser) {
       entries.add(LeaderboardEntry(
         userId: userProfile.id,
         displayName: userProfile.displayName,
         avatarUrl: userProfile.avatarUrl,
         totalXp: userProfile.totalXp,
-        rank: userRank,
+        rank: userRank ?? entries.length + 1,
         level: userProfile.level,
         isCurrentUser: true,
       ));
@@ -151,9 +151,10 @@ class LeaderboardNotifier extends StateNotifier<LeaderboardState> {
 
     state = state.copyWith(
       entries: entries,
-      totalParticipants: result.totalParticipants,
+      totalParticipants:
+          result.totalParticipants > 0 ? result.totalParticipants : entries.length,
       isLoading: false,
-      currentUserRank: userRank,
+      currentUserRank: userRank ?? entries.length,
     );
   }
 

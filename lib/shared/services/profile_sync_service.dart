@@ -1,0 +1,88 @@
+import 'dart:io';
+import 'package:supabase_flutter/supabase_flutter.dart';
+import 'package:travel_buddy/shared/models/user_profile.dart';
+import 'package:path/path.dart' as path;
+
+class ProfileSyncService {
+  final SupabaseClient _client;
+
+  ProfileSyncService(this._client);
+
+  /// Uploads an avatar image to Supabase Storage.
+  /// Returns the public URL on success, or the [localFilePath] as-is in demo mode.
+  Future<String?> uploadAvatar(String localFilePath) async {
+    try {
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) return localFilePath;
+
+      final file = File(localFilePath);
+      if (!await file.exists()) return localFilePath;
+
+      final ext = path.extension(localFilePath).replaceFirst('.', '');
+      final storagePath = '$userId/avatar.$ext';
+
+      await _client.storage.from('photos').upload(
+            storagePath,
+            file,
+            fileOptions: const FileOptions(upsert: true),
+          );
+
+      final publicUrl =
+          _client.storage.from('photos').getPublicUrl(storagePath);
+      return publicUrl;
+    } catch (_) {
+      return localFilePath;
+    }
+  }
+
+  /// Upserts the user profile to the remote `profiles` table.
+  Future<void> syncProfileToRemote(UserProfile profile) async {
+    try {
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) return;
+
+      await _client.from('profiles').upsert({
+        'id': userId,
+        'display_name': profile.displayName,
+        'username': profile.username,
+        'bio': profile.bio,
+        'avatar_url': profile.avatarUrl,
+        'total_xp': profile.totalXp,
+        'level': profile.level,
+        'is_public': profile.isPublic,
+        'is_premium': profile.isPremium,
+      });
+    } catch (_) {
+      // Silently fail — local persistence is primary
+    }
+  }
+
+  /// Fetches the user profile from the remote `profiles` table.
+  Future<UserProfile?> loadProfileFromRemote() async {
+    try {
+      final userId = _client.auth.currentUser?.id;
+      if (userId == null) return null;
+
+      final data =
+          await _client.from('profiles').select().eq('id', userId).maybeSingle();
+
+      if (data == null) return null;
+
+      return UserProfile(
+        id: userId,
+        displayName: data['display_name'] as String? ?? 'Traveler',
+        username: data['username'] as String?,
+        bio: data['bio'] as String?,
+        avatarUrl: data['avatar_url'] as String?,
+        totalXp: data['total_xp'] as int? ?? 0,
+        level: data['level'] as int? ?? 1,
+        isPremium: data['is_premium'] as bool? ?? false,
+        isPublic: data['is_public'] as bool? ?? true,
+        createdAt: DateTime.tryParse(data['created_at'] as String? ?? '') ??
+            DateTime.now(),
+      );
+    } catch (_) {
+      return null;
+    }
+  }
+}

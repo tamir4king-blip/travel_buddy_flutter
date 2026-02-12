@@ -314,8 +314,8 @@ const masterAchievementRegistry = <MasterAchievement>[
     requirements: [
       MasterRequirement(
         type: MasterRequirementType.achievementCount,
-        targetValue: 15, // Total achievements in registry
-        description: 'Unlock all 15 achievements',
+        targetValue: 21, // Total achievements in registry
+        description: 'Unlock all 21 achievements',
       ),
     ],
   ),

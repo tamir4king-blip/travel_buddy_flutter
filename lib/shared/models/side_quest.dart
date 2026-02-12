@@ -15,6 +15,9 @@ class SideQuest {
   final int maxCompletions;
   final int completionCount;
   final bool isCompleted;
+  final String? requiredSkillType;
+  final int? requiredSkillLevel;
+  final List<String> requiredQuestIds;
 
   const SideQuest({
     required this.id,
@@ -29,11 +32,32 @@ class SideQuest {
     this.maxCompletions = 1,
     this.completionCount = 0,
     this.isCompleted = false,
+    this.requiredSkillType,
+    this.requiredSkillLevel,
+    this.requiredQuestIds = const [],
   });
+
+  bool isUnlocked({
+    required Map<String, int> skillLevels,
+    required List<SideQuest> allQuests,
+  }) {
+    if (requiredSkillType != null && requiredSkillLevel != null) {
+      final currentLevel = skillLevels[requiredSkillType] ?? 0;
+      if (currentLevel < requiredSkillLevel!) return false;
+    }
+    for (final reqId in requiredQuestIds) {
+      final reqQuest = allQuests.where((q) => q.id == reqId).firstOrNull;
+      if (reqQuest == null || !reqQuest.isCompleted) return false;
+    }
+    return true;
+  }
 
   SideQuest copyWith({
     int? completionCount,
     bool? isCompleted,
+    String? requiredSkillType,
+    int? requiredSkillLevel,
+    List<String>? requiredQuestIds,
   }) {
     return SideQuest(
       id: id,
@@ -48,6 +72,9 @@ class SideQuest {
       maxCompletions: maxCompletions,
       completionCount: completionCount ?? this.completionCount,
       isCompleted: isCompleted ?? this.isCompleted,
+      requiredSkillType: requiredSkillType ?? this.requiredSkillType,
+      requiredSkillLevel: requiredSkillLevel ?? this.requiredSkillLevel,
+      requiredQuestIds: requiredQuestIds ?? this.requiredQuestIds,
     );
   }
 }

@@ -23,6 +23,7 @@ const fishingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'angler', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'lake-fishing', title: 'Lake Fishing',
@@ -47,6 +48,7 @@ const fishingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 85,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.timeBased,
+    requiredSkillType: 'angler', requiredSkillLevel: 2,
   ),
   SideQuest(
     id: 'fly-fishing', title: 'Fly Fishing',
@@ -55,6 +57,7 @@ const fishingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 90,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredQuestIds: ['first-catch'],
   ),
   SideQuest(
     id: 'ice-fishing', title: 'Ice Fishing',
@@ -63,6 +66,7 @@ const fishingQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 200,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'angler', requiredSkillLevel: 8,
   ),
   SideQuest(
     id: 'catch-and-release', title: 'Catch & Release',
@@ -109,6 +113,7 @@ const cookingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 80,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'chef', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'bake-bread', title: 'Bread Baker',
@@ -125,6 +130,7 @@ const cookingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 85,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'chef', requiredSkillLevel: 5,
   ),
   SideQuest(
     id: 'catch-cook', title: 'Catch & Cook',
@@ -133,6 +139,8 @@ const cookingQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 150,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'chef', requiredSkillLevel: 8,
+    requiredQuestIds: ['first-catch'],
   ),
 ];
 
@@ -147,6 +155,7 @@ const hikingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.timeBased,
+    requiredSkillType: 'hiker', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'waterfall-trail', title: 'Waterfall Hunter',
@@ -163,6 +172,7 @@ const hikingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 80,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.timeBased,
+    requiredSkillType: 'hiker', requiredSkillLevel: 2,
   ),
   SideQuest(
     id: 'ten-km-hike', title: '10K Challenge',
@@ -179,6 +189,7 @@ const hikingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 90,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'hiker', requiredSkillLevel: 4,
   ),
   SideQuest(
     id: 'summit-peak', title: 'Peak Conquest',
@@ -187,6 +198,7 @@ const hikingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'hiker', requiredSkillLevel: 5,
   ),
   SideQuest(
     id: 'forest-walk', title: 'Forest Walk',
@@ -211,6 +223,7 @@ const hikingQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 250,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'hiker', requiredSkillLevel: 8,
   ),
   SideQuest(
     id: 'thousand-steps', title: 'Thousand Steps',
@@ -219,6 +232,7 @@ const hikingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 75,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.manual,
+    requiredSkillType: 'hiker', requiredSkillLevel: 3,
   ),
 ];
 
@@ -240,6 +254,7 @@ const skiingQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 200,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'skier', requiredSkillLevel: 5,
   ),
   SideQuest(
     id: 'powder-day', title: 'Powder Day',
@@ -248,6 +263,7 @@ const skiingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'skier', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'snowboard-first', title: 'Snowboard First',
@@ -263,6 +279,7 @@ const skiingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 85,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.timeBased,
+    requiredQuestIds: ['first-slope'],
   ),
   SideQuest(
     id: 'ski-lesson', title: 'Ski Lesson',
@@ -271,6 +288,23 @@ const skiingQuests = <SideQuest>[
     difficulty: QuestDifficulty.easy, xpReward: 35,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+  ),
+  SideQuest(
+    id: 'slide-from-bansko', title: 'Slide from Bansko',
+    description: 'Ski down one of Bansko\'s slopes in Bulgaria',
+    category: 'skiing', skillType: 'skier',
+    difficulty: QuestDifficulty.easy, xpReward: 40,
+    verification: VerificationMethod.photo,
+  ),
+  SideQuest(
+    id: 'slide-from-verbier', title: 'Slide from Verbier',
+    description: 'Conquer a run at Verbier resort in Switzerland',
+    category: 'skiing', skillType: 'skier',
+    difficulty: QuestDifficulty.hard, xpReward: 120,
+    isRepeatable: true, maxCompletions: 3,
+    verification: VerificationMethod.photo,
+    requiredSkillType: 'skier', requiredSkillLevel: 5,
+    requiredQuestIds: ['slide-from-bansko'],
   ),
 ];
 
@@ -292,6 +326,7 @@ const campingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 90,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'camper', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'stargazing', title: 'Stargazing',
@@ -324,6 +359,7 @@ const campingQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'camper', requiredSkillLevel: 5,
   ),
   SideQuest(
     id: 'rainy-camp', title: 'Rainy Camp',
@@ -340,6 +376,7 @@ const campingQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 300,
     isRepeatable: true, maxCompletions: 2,
     verification: VerificationMethod.manual,
+    requiredSkillType: 'camper', requiredSkillLevel: 10,
   ),
 ];
 
@@ -362,6 +399,7 @@ const photographyQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 80,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'photographer', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'panorama', title: 'Panorama',
@@ -378,6 +416,7 @@ const photographyQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 75,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'photographer', requiredSkillLevel: 4,
   ),
   SideQuest(
     id: 'selfie-landmark', title: 'Landmark Selfie',
@@ -394,6 +433,7 @@ const photographyQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 90,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'photographer', requiredSkillLevel: 5,
   ),
   SideQuest(
     id: 'underwater-photo', title: 'Underwater Photo',
@@ -410,6 +450,7 @@ const photographyQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 200,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'photographer', requiredSkillLevel: 8,
   ),
   SideQuest(
     id: 'street-portrait', title: 'Street Portrait',
@@ -455,6 +496,7 @@ const waterSportsQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'diver', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'jet-ski', title: 'Jet Ski',
@@ -487,6 +529,7 @@ const waterSportsQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'kayaker', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'cliff-jumping', title: 'Cliff Jumping',
@@ -495,6 +538,7 @@ const waterSportsQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 90,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'diver', requiredSkillLevel: 5,
   ),
 ];
 
@@ -517,6 +561,7 @@ const wildlifeQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'naturalist', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'marine-life', title: 'Marine Life',
@@ -533,6 +578,7 @@ const wildlifeQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 180,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'naturalist', requiredSkillLevel: 8,
   ),
   SideQuest(
     id: 'butterfly-garden', title: 'Butterfly Garden',
@@ -643,6 +689,7 @@ const culturalQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'historian', requiredSkillLevel: 5,
   ),
 ];
 
@@ -657,6 +704,7 @@ const adventureQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 200,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'skydiver', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'paragliding', title: 'Paragliding',
@@ -697,6 +745,7 @@ const adventureQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 180,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'pilot', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'caving', title: 'Cave Exploration',
@@ -759,6 +808,7 @@ const wellnessQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'yogi', requiredSkillLevel: 5,
   ),
   SideQuest(
     id: 'massage', title: 'Traditional Massage',
@@ -783,6 +833,7 @@ const wellnessQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 100,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.manual,
+    requiredSkillType: 'yogi', requiredSkillLevel: 4,
   ),
 ];
 
@@ -845,6 +896,7 @@ const nightlifeQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 90,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.timeBased,
+    requiredSkillType: 'partygoer', requiredSkillLevel: 5,
   ),
 ];
 
@@ -977,6 +1029,7 @@ const socialQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 150,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'socialite', requiredSkillLevel: 8,
   ),
 ];
 
@@ -991,6 +1044,7 @@ const extremeQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 300,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'skydiver', requiredSkillLevel: 5,
   ),
   SideQuest(
     id: 'shark-diving', title: 'Shark Cage Diving',
@@ -999,6 +1053,7 @@ const extremeQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 250,
     isRepeatable: true, maxCompletions: 2,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'diver', requiredSkillLevel: 8,
   ),
   SideQuest(
     id: 'via-ferrata', title: 'Via Ferrata',
@@ -1015,6 +1070,7 @@ const extremeQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 220,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'climber', requiredSkillLevel: 8,
   ),
   SideQuest(
     id: 'volcano-hike', title: 'Active Volcano',
@@ -1023,6 +1079,7 @@ const extremeQuests = <SideQuest>[
     difficulty: QuestDifficulty.legendary, xpReward: 200,
     isRepeatable: true, maxCompletions: 3,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'hiker', requiredSkillLevel: 10,
   ),
   SideQuest(
     id: 'night-dive', title: 'Night Dive',
@@ -1031,6 +1088,8 @@ const extremeQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 130,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.timeBased,
+    requiredSkillType: 'diver', requiredSkillLevel: 5,
+    requiredQuestIds: ['scuba-diving'],
   ),
   SideQuest(
     id: 'sandboarding', title: 'Sandboarding',
@@ -1131,6 +1190,7 @@ const transportationQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 80,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    requiredSkillType: 'roadtripper', requiredSkillLevel: 3,
   ),
   SideQuest(
     id: 'tuk-tuk', title: 'Tuk-Tuk Ride',

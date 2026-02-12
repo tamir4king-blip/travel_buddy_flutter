@@ -212,6 +212,19 @@
   "rankN": "Rank #{rank}",
   "@rankN": { "placeholders": { "rank": { "type": "int" } } },
 
+  "navSkills": "Skills",
+  "locked": "Locked",
+  "requires": "Requires: {requirement}",
+  "@requires": { "placeholders": { "requirement": { "type": "String" } } },
+  "relatedQuests": "Related Quests",
+  "viewQuests": "View Quests",
+  "completedOfTotal": "{completed} of {total} completed",
+  "@completedOfTotal": { "placeholders": { "completed": { "type": "int" }, "total": { "type": "int" } } },
+  "xpNeeded": "{xp} XP needed",
+  "@xpNeeded": { "placeholders": { "xp": { "type": "int" } } },
+  "nSkills": "{count} skills",
+  "@nSkills": { "placeholders": { "count": { "type": "int" } } },
+
   "english": "English",
   "hebrew": "עברית"
 }

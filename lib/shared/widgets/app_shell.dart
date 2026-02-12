@@ -26,8 +26,10 @@ class _AppShellState extends ConsumerState<AppShell> {
     if (location == '/') return 0;
     if (location == '/map') return 1;
     if (location == '/quests') return 2;
-    if (location == '/leaderboard') return 3;
-    if (location == '/profile') return 4;
+    if (location == '/skills') return 3;
+    if (location == '/achievements') return 4;
+    if (location == '/leaderboard') return 5;
+    if (location == '/profile') return 6;
     return 0;
   }
 
@@ -40,8 +42,12 @@ class _AppShellState extends ConsumerState<AppShell> {
       case 2:
         context.go('/quests');
       case 3:
-        context.go('/leaderboard');
+        context.go('/skills');
       case 4:
+        context.go('/achievements');
+      case 5:
+        context.go('/leaderboard');
+      case 6:
         context.go('/profile');
     }
   }
@@ -90,14 +96,25 @@ class _AppShellState extends ConsumerState<AppShell> {
                   onDestinationSelected: (index) =>
                       _onDestinationSelected(context, index),
                   backgroundColor: AppColors.bgCard,
-                  selectedIconTheme: const IconThemeData(color: AppColors.primary),
-                  selectedLabelTextStyle: const TextStyle(
-                    color: AppColors.primary,
-                    fontWeight: FontWeight.w600,
+                  selectedIconTheme: const IconThemeData(
+                    color: AppColors.primaryLight,
+                    size: 22,
                   ),
-                  unselectedIconTheme: const IconThemeData(color: AppColors.textMuted),
-                  unselectedLabelTextStyle: const TextStyle(color: AppColors.textMuted),
-                  indicatorColor: AppColors.primary.withValues(alpha: 0.2),
+                  selectedLabelTextStyle: const TextStyle(
+                    color: AppColors.primaryLight,
+                    fontWeight: FontWeight.w700,
+                    fontSize: 13,
+                    letterSpacing: -0.2,
+                  ),
+                  unselectedIconTheme: IconThemeData(
+                    color: AppColors.textMuted.withValues(alpha: 0.7),
+                    size: 20,
+                  ),
+                  unselectedLabelTextStyle: TextStyle(
+                    color: AppColors.textMuted.withValues(alpha: 0.7),
+                    fontSize: 12,
+                  ),
+                  indicatorColor: AppColors.primary.withValues(alpha: 0.15),
                   destinations: [
                     NavigationRailDestination(
                       icon: const Icon(LucideIcons.home),
@@ -115,6 +132,16 @@ class _AppShellState extends ConsumerState<AppShell> {
                       label: Text(l10n.navQuests),
                     ),
                     NavigationRailDestination(
+                      icon: const Icon(LucideIcons.sparkles),
+                      selectedIcon: const Icon(LucideIcons.sparkles),
+                      label: Text(l10n.navSkills),
+                    ),
+                    NavigationRailDestination(
+                      icon: const Icon(LucideIcons.award),
+                      selectedIcon: const Icon(LucideIcons.award),
+                      label: Text(l10n.navAchievements),
+                    ),
+                    NavigationRailDestination(
                       icon: const Icon(LucideIcons.trophy),
                       selectedIcon: const Icon(LucideIcons.trophy),
                       label: Text(l10n.navRankings),
@@ -126,52 +153,73 @@ class _AppShellState extends ConsumerState<AppShell> {
                     ),
                   ],
                 ),
-                const VerticalDivider(
+                VerticalDivider(
                   width: 1,
                   thickness: 1,
-                  color: AppColors.bgCardLight,
+                  color: AppColors.bgCardLight.withValues(alpha: 0.5),
                 ),
                 Expanded(child: widget.child),
               ],
             ),
           );
         } else {
-          // Mobile layout with bottom navigation bar
+          // Mobile layout — frosted bottom nav
           body = Scaffold(
             body: widget.child,
-            bottomNavigationBar: NavigationBar(
-              selectedIndex: selectedIndex,
-              onDestinationSelected: (index) =>
-                  _onDestinationSelected(context, index),
-              backgroundColor: AppColors.bgCard,
-              indicatorColor: AppColors.primary.withValues(alpha: 0.2),
-              destinations: [
-                NavigationDestination(
-                  icon: const Icon(LucideIcons.home),
-                  selectedIcon: const Icon(LucideIcons.home, color: AppColors.primary),
-                  label: l10n.navHome,
+            bottomNavigationBar: Container(
+              decoration: BoxDecoration(
+                border: Border(
+                  top: BorderSide(
+                    color: AppColors.primary.withValues(alpha: 0.08),
+                  ),
                 ),
-                NavigationDestination(
-                  icon: const Icon(LucideIcons.map),
-                  selectedIcon: const Icon(LucideIcons.map, color: AppColors.primary),
-                  label: l10n.navMap,
-                ),
-                NavigationDestination(
-                  icon: const Icon(LucideIcons.compass),
-                  selectedIcon: const Icon(LucideIcons.compass, color: AppColors.primary),
-                  label: l10n.navQuests,
-                ),
-                NavigationDestination(
-                  icon: const Icon(LucideIcons.trophy),
-                  selectedIcon: const Icon(LucideIcons.trophy, color: AppColors.primary),
-                  label: l10n.navRankings,
-                ),
-                NavigationDestination(
-                  icon: const Icon(LucideIcons.user),
-                  selectedIcon: const Icon(LucideIcons.user, color: AppColors.primary),
-                  label: l10n.navProfile,
-                ),
-              ],
+              ),
+              child: NavigationBar(
+                selectedIndex: selectedIndex,
+                onDestinationSelected: (index) =>
+                    _onDestinationSelected(context, index),
+                backgroundColor: AppColors.bgCard,
+                indicatorColor: AppColors.primary.withValues(alpha: 0.12),
+                labelBehavior: NavigationDestinationLabelBehavior.alwaysShow,
+                height: 68,
+                destinations: [
+                  NavigationDestination(
+                    icon: Icon(LucideIcons.home, color: AppColors.textMuted.withValues(alpha: 0.6), size: 20),
+                    selectedIcon: const Icon(LucideIcons.home, color: AppColors.primaryLight, size: 22),
+                    label: l10n.navHome,
+                  ),
+                  NavigationDestination(
+                    icon: Icon(LucideIcons.map, color: AppColors.textMuted.withValues(alpha: 0.6), size: 20),
+                    selectedIcon: const Icon(LucideIcons.map, color: AppColors.primaryLight, size: 22),
+                    label: l10n.navMap,
+                  ),
+                  NavigationDestination(
+                    icon: Icon(LucideIcons.compass, color: AppColors.textMuted.withValues(alpha: 0.6), size: 20),
+                    selectedIcon: const Icon(LucideIcons.compass, color: AppColors.primaryLight, size: 22),
+                    label: l10n.navQuests,
+                  ),
+                  NavigationDestination(
+                    icon: Icon(LucideIcons.sparkles, color: AppColors.textMuted.withValues(alpha: 0.6), size: 20),
+                    selectedIcon: const Icon(LucideIcons.sparkles, color: AppColors.primaryLight, size: 22),
+                    label: l10n.navSkills,
+                  ),
+                  NavigationDestination(
+                    icon: Icon(LucideIcons.award, color: AppColors.textMuted.withValues(alpha: 0.6), size: 20),
+                    selectedIcon: const Icon(LucideIcons.award, color: AppColors.primaryLight, size: 22),
+                    label: l10n.navAchievements,
+                  ),
+                  NavigationDestination(
+                    icon: Icon(LucideIcons.trophy, color: AppColors.textMuted.withValues(alpha: 0.6), size: 20),
+                    selectedIcon: const Icon(LucideIcons.trophy, color: AppColors.primaryLight, size: 22),
+                    label: l10n.navRankings,
+                  ),
+                  NavigationDestination(
+                    icon: Icon(LucideIcons.user, color: AppColors.textMuted.withValues(alpha: 0.6), size: 20),
+                    selectedIcon: const Icon(LucideIcons.user, color: AppColors.primaryLight, size: 22),
+                    label: l10n.navProfile,
+                  ),
+                ],
+              ),
             ),
           );
         }

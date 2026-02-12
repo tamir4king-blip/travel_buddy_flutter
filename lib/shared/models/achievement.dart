@@ -47,6 +47,7 @@ class Achievement {
     List<String>? photos,
     String? notes,
     bool? isRetroactive,
+    double? claimRadius,
   }) {
     return Achievement(
       id: id,
@@ -57,7 +58,7 @@ class Achievement {
       xpReward: xpReward,
       latitude: latitude,
       longitude: longitude,
-      claimRadius: claimRadius,
+      claimRadius: claimRadius ?? this.claimRadius,
       collectionId: collectionId,
       tags: tags,
       isUnlocked: isUnlocked ?? this.isUnlocked,

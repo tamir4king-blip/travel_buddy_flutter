@@ -13,14 +13,10 @@ class CollectionInfo {
 }
 
 const collectionRegistry = <CollectionInfo>[
-  CollectionInfo(id: 'getting-started', name: 'Getting Started', icon: '🚀', bonusXp: 50),
-  CollectionInfo(id: 'cities', name: 'Cities', icon: '🏙️', bonusXp: 75),
-  CollectionInfo(id: 'nature', name: 'Nature', icon: '🌲', bonusXp: 100),
-  CollectionInfo(id: 'food-drink', name: 'Food & Drink', icon: '🍽️', bonusXp: 75),
-  CollectionInfo(id: 'culture', name: 'Culture', icon: '🏛️', bonusXp: 100),
-  CollectionInfo(id: 'photography', name: 'Photography', icon: '📸', bonusXp: 75),
-  CollectionInfo(id: 'countries', name: 'Countries', icon: '🌍', bonusXp: 200),
-  CollectionInfo(id: 'water-sports', name: 'Water Sports', icon: '🏄', bonusXp: 100),
+  CollectionInfo(id: 'beaches', name: 'Beaches', icon: '🏖️', bonusXp: 75),
+  CollectionInfo(id: 'landmarks', name: 'Landmarks', icon: '🏛️', bonusXp: 100),
+  CollectionInfo(id: 'parks', name: 'Parks', icon: '🌳', bonusXp: 100),
+  CollectionInfo(id: 'culture', name: 'Culture', icon: '🎭', bonusXp: 75),
 ];
 
 CollectionInfo? getCollectionInfo(String id) {
