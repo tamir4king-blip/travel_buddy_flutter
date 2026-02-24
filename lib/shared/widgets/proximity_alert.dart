@@ -1,7 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/widgets/achievement_marker.dart';
 import 'package:travel_buddy_mobile/l10n/registry_l10n.dart';

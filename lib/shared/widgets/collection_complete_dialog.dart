@@ -1,7 +1,7 @@
 import 'package:confetti/confetti.dart';
 import 'package:flutter/material.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/l10n/registry_l10n.dart';
 import 'package:travel_buddy_mobile/shared/data/collection_registry.dart';

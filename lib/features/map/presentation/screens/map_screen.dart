@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/map_view.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/widgets/achievement_marker.dart';
@@ -278,7 +278,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
           // Center on Me FAB
           Positioned(
-            bottom: 100,
+            bottom: 168,
             right: 16,
             child: FloatingActionButton(
               onPressed: _centerOnUser,
@@ -337,7 +337,7 @@ class _MapScreenState extends ConsumerState<MapScreen> {
           Positioned(
             left: 0,
             right: 0,
-            bottom: 0,
+            bottom: 68,
             child: SafeArea(
               top: false,
               child: Container(

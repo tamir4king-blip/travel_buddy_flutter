@@ -2,7 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_animate/flutter_animate.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
-import 'package:flutter_gen/gen_l10n/app_localizations.dart';
+import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/widgets/profile_avatar.dart';
 import 'package:travel_buddy_mobile/shared/providers/leaderboard_provider.dart';

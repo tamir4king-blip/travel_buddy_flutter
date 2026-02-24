@@ -5,7 +5,6 @@ import 'package:travel_buddy_mobile/features/auth/presentation/screens/auth_scre
 import 'package:travel_buddy_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:travel_buddy_mobile/features/achievements/presentation/screens/achievements_screen.dart';
 import 'package:travel_buddy_mobile/features/quests/presentation/screens/quests_screen.dart';
-import 'package:travel_buddy_mobile/features/map/presentation/screens/map_screen.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/profile_screen.dart';
 import 'package:travel_buddy_mobile/features/leaderboard/presentation/screens/leaderboard_screen.dart';
 import 'package:travel_buddy_mobile/features/skills/presentation/screens/skills_screen.dart';
@@ -93,12 +92,6 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/',
             pageBuilder: (context, state) => const NoTransitionPage(
               child: HomeScreen(),
-            ),
-          ),
-          GoRoute(
-            path: '/map',
-            pageBuilder: (context, state) => const NoTransitionPage(
-              child: MapScreen(),
             ),
           ),
           GoRoute(
