@@ -27,6 +27,15 @@ class AppLocalizationsEn extends AppLocalizations {
   String get navProfile => 'Profile';
 
   @override
+  String get navExplore => 'Explore';
+
+  @override
+  String get navLog => 'Log';
+
+  @override
+  String get activityLog => 'Activity Log';
+
+  @override
   String get welcomeBack => 'Welcome back,';
 
   @override
@@ -805,4 +814,13 @@ class AppLocalizationsEn extends AppLocalizations {
 
   @override
   String get noUnlockedTrophiesYet => 'No unlocked trophies yet.';
+
+  @override
+  String get mapFilterAchievements => 'Achievements';
+
+  @override
+  String get mapFilterQuests => 'Quests';
+
+  @override
+  String get mapFilterSkills => 'Skills';
 }

@@ -4,12 +4,19 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
+import 'package:travel_buddy_mobile/features/map/models/map_marker_item.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/map_view.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/widgets/achievement_marker.dart';
+import 'package:travel_buddy_mobile/features/map/presentation/widgets/map_filter_bar.dart';
+import 'package:travel_buddy_mobile/features/map/providers/map_filter_provider.dart';
 import 'package:travel_buddy_mobile/l10n/registry_l10n.dart';
 import 'package:travel_buddy_mobile/shared/models/achievement.dart';
+import 'package:travel_buddy_mobile/shared/models/side_quest.dart';
+import 'package:travel_buddy_mobile/shared/models/skill_group.dart';
 import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/quests_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/skills_provider.dart';
 
 const _mapboxToken = String.fromEnvironment('MAPBOX_TOKEN');
 
@@ -45,13 +52,31 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     super.dispose();
   }
 
-  void _onMarkerClick(String achievementId) {
-    final achievements = ref.read(achievementsProvider);
-    final achievement = achievements.allAchievements
-        .where((a) => a.id == achievementId)
-        .firstOrNull;
-    if (achievement != null && mounted) {
-      _showAchievementSheet(context, achievement);
+  void _onMarkerClick(String markerId, MapMarkerType type) {
+    if (!mounted) return;
+    switch (type) {
+      case MapMarkerType.achievement:
+        final achievements = ref.read(achievementsProvider);
+        final achievement = achievements.allAchievements
+            .where((a) => a.id == markerId)
+            .firstOrNull;
+        if (achievement != null) {
+          _showAchievementSheet(context, achievement);
+        }
+      case MapMarkerType.quest:
+        final quests = ref.read(questsProvider);
+        final quest = quests.allQuests
+            .where((q) => q.id == markerId)
+            .firstOrNull;
+        if (quest != null) {
+          _showQuestSheet(context, quest);
+        }
+      case MapMarkerType.skill:
+        final skills = ref.read(skillsProvider);
+        final skill = skills.getSkillById(markerId);
+        if (skill != null) {
+          _showSkillSheet(context, skill);
+        }
     }
   }
 
@@ -69,12 +94,40 @@ class _MapScreenState extends ConsumerState<MapScreen> {
 
     final geo = ref.read(geolocationProvider);
     final achievements = ref.read(achievementsProvider);
+    final quests = ref.read(questsProvider);
+    final skills = ref.read(skillsProvider);
+    final filter = ref.read(mapFilterProvider);
 
-    final locationAchievements = achievements.allAchievements
-        .where((a) => a.latitude != null && a.longitude != null)
-        .toList();
+    final markers = <MapMarkerItem>[];
 
-    _mapController.setMarkers(locationAchievements);
+    // Achievement markers
+    if (filter.showAchievements) {
+      for (final a in achievements.allAchievements) {
+        if (a.latitude != null && a.longitude != null) {
+          markers.add(AchievementMarkerItem(achievement: a));
+        }
+      }
+    }
+
+    // Quest markers
+    if (filter.showQuests) {
+      for (final q in quests.allQuests) {
+        if (q.latitude != null && q.longitude != null) {
+          markers.add(QuestMarkerItem(quest: q));
+        }
+      }
+    }
+
+    // Skill markers
+    if (filter.showSkills) {
+      for (final s in skills.allSkills) {
+        if (s.latitude != null && s.longitude != null) {
+          markers.add(SkillMarkerItem(skill: s));
+        }
+      }
+    }
+
+    _mapController.setMarkers(markers);
 
     if (geo.hasLocation) {
       _mapController.setUserLocation(geo.latitude!, geo.longitude!);
@@ -219,10 +272,238 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     );
   }
 
+  void _showQuestSheet(BuildContext context, SideQuest quest) {
+    final difficultyLabel = switch (quest.difficulty) {
+      QuestDifficulty.easy => 'Easy',
+      QuestDifficulty.medium => 'Medium',
+      QuestDifficulty.hard => 'Hard',
+      QuestDifficulty.legendary => 'Legendary',
+    };
+    final difficultyColor = switch (quest.difficulty) {
+      QuestDifficulty.easy => AppColors.success,
+      QuestDifficulty.medium => AppColors.accent,
+      QuestDifficulty.hard => const Color(0xFFF97316),
+      QuestDifficulty.legendary => const Color(0xFF9333EA),
+    };
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.textMuted,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: difficultyColor,
+                      ),
+                      child: const Icon(
+                        LucideIcons.swords,
+                        color: Colors.white,
+                        size: 22,
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            quest.title,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Row(
+                            children: [
+                              Container(
+                                padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                                decoration: BoxDecoration(
+                                  color: difficultyColor.withValues(alpha: 0.15),
+                                  borderRadius: BorderRadius.circular(6),
+                                ),
+                                child: Text(
+                                  difficultyLabel,
+                                  style: TextStyle(
+                                    color: difficultyColor,
+                                    fontSize: 11,
+                                    fontWeight: FontWeight.w600,
+                                  ),
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Text(
+                                '+${quest.xpReward} XP',
+                                style: const TextStyle(
+                                  color: AppColors.xpGreen,
+                                  fontWeight: FontWeight.w600,
+                                  fontSize: 13,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  quest.description,
+                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                ),
+                const SizedBox(height: 8),
+                Row(
+                  children: [
+                    Icon(LucideIcons.tag, size: 14, color: AppColors.textMuted),
+                    const SizedBox(width: 6),
+                    Text(
+                      quest.category,
+                      style: const TextStyle(color: AppColors.textMuted, fontSize: 13),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                if (quest.isCompleted)
+                  Center(
+                    child: Text(
+                      AppLocalizations.of(context)!.unlocked,
+                      style: const TextStyle(
+                        color: AppColors.success,
+                        fontWeight: FontWeight.w600,
+                        fontSize: 16,
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  void _showSkillSheet(BuildContext context, SkillGroup skill) {
+    final locale = Localizations.localeOf(context);
+    final questsState = ref.read(questsProvider);
+    final level = questsState.skillLevels[skill.id] ?? 0;
+
+    showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgCard,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(20)),
+      ),
+      builder: (context) {
+        return SafeArea(
+          child: Padding(
+            padding: const EdgeInsets.all(20),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Center(
+                  child: Container(
+                    width: 40,
+                    height: 4,
+                    decoration: BoxDecoration(
+                      color: AppColors.textMuted,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Row(
+                  children: [
+                    Container(
+                      width: 44,
+                      height: 44,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        color: SkillMarkerItem.parseHexColor(skill.gradientStart),
+                      ),
+                      child: Center(
+                        child: Text(
+                          skill.icon,
+                          style: const TextStyle(fontSize: 22),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(width: 14),
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            RegistryL10n.skillName(locale, skill.id, skill.name),
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.textPrimary,
+                            ),
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            '${AppLocalizations.of(context)!.level} $level / ${skill.maxLevel}',
+                            style: const TextStyle(
+                              color: AppColors.primaryLight,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 13,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 12),
+                Text(
+                  RegistryL10n.skillDescription(locale, skill.id, skill.description),
+                  style: const TextStyle(color: AppColors.textSecondary, fontSize: 14),
+                ),
+                const SizedBox(height: 16),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final geo = ref.watch(geolocationProvider);
     final achievements = ref.watch(achievementsProvider);
+    // Watch these providers to rebuild when they change
+    ref.watch(questsProvider);
+    ref.watch(skillsProvider);
+    ref.watch(mapFilterProvider);
     final l10n = AppLocalizations.of(context)!;
     final locale = Localizations.localeOf(context);
 
@@ -247,31 +528,36 @@ class _MapScreenState extends ConsumerState<MapScreen> {
             child: PlatformMapViewWidget(controller: _mapController),
           ),
 
-          // Top search bar overlay
+          // Top search bar + filter bar overlay
           Positioned(
             top: 0,
             left: 0,
             right: 0,
             child: SafeArea(
-              child: Padding(
-                padding: const EdgeInsets.all(16),
-                child: Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
-                  decoration: BoxDecoration(
-                    color: AppColors.bgCard.withValues(alpha: 0.95),
-                    borderRadius: BorderRadius.circular(14),
-                  ),
-                  child: Row(
-                    children: [
-                      Icon(LucideIcons.search, size: 18, color: AppColors.textMuted),
-                      const SizedBox(width: 10),
-                      Text(
-                        l10n.searchAchievements,
-                        style: TextStyle(color: AppColors.textMuted),
+              child: Column(
+                children: [
+                  Padding(
+                    padding: const EdgeInsets.all(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+                      decoration: BoxDecoration(
+                        color: AppColors.bgCard.withValues(alpha: 0.95),
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                    ],
+                      child: Row(
+                        children: [
+                          Icon(LucideIcons.search, size: 18, color: AppColors.textMuted),
+                          const SizedBox(width: 10),
+                          Text(
+                            l10n.searchAchievements,
+                            style: TextStyle(color: AppColors.textMuted),
+                          ),
+                        ],
+                      ),
+                    ),
                   ),
-                ),
+                  const MapFilterBar(),
+                ],
               ),
             ),
           ),

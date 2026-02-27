@@ -7,6 +7,9 @@
   "navRankings": "Rankings",
   "navAchievements": "Achievements",
   "navProfile": "Profile",
+  "navExplore": "Explore",
+  "navLog": "Log",
+  "activityLog": "Activity Log",
 
   "welcomeBack": "Welcome back,",
   "levelN": "Level {level}",
@@ -311,5 +314,9 @@
   "heatmapOther": "Other",
 
   "unlockTimeline": "Unlock Timeline",
-  "noUnlockedTrophiesYet": "No unlocked trophies yet."
+  "noUnlockedTrophiesYet": "No unlocked trophies yet.",
+
+  "mapFilterAchievements": "Achievements",
+  "mapFilterQuests": "Quests",
+  "mapFilterSkills": "Skills"
 }

@@ -18,6 +18,8 @@ class SideQuest {
   final String? requiredSkillType;
   final int? requiredSkillLevel;
   final List<String> requiredQuestIds;
+  final double? latitude;
+  final double? longitude;
 
   const SideQuest({
     required this.id,
@@ -35,6 +37,8 @@ class SideQuest {
     this.requiredSkillType,
     this.requiredSkillLevel,
     this.requiredQuestIds = const [],
+    this.latitude,
+    this.longitude,
   });
 
   bool isUnlocked({
@@ -58,6 +62,8 @@ class SideQuest {
     String? requiredSkillType,
     int? requiredSkillLevel,
     List<String>? requiredQuestIds,
+    double? latitude,
+    double? longitude,
   }) {
     return SideQuest(
       id: id,
@@ -75,6 +81,8 @@ class SideQuest {
       requiredSkillType: requiredSkillType ?? this.requiredSkillType,
       requiredSkillLevel: requiredSkillLevel ?? this.requiredSkillLevel,
       requiredQuestIds: requiredQuestIds ?? this.requiredQuestIds,
+      latitude: latitude ?? this.latitude,
+      longitude: longitude ?? this.longitude,
     );
   }
 }

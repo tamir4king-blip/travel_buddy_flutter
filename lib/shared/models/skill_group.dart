@@ -8,6 +8,8 @@ class SkillGroup {
   final int xpPerLevel;
   final String gradientStart;
   final String gradientEnd;
+  final double? latitude;
+  final double? longitude;
 
   const SkillGroup({
     required this.id,
@@ -19,5 +21,7 @@ class SkillGroup {
     required this.xpPerLevel,
     required this.gradientStart,
     required this.gradientEnd,
+    this.latitude,
+    this.longitude,
   });
 }

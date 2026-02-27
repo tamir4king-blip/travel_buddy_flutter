@@ -27,6 +27,15 @@ class AppLocalizationsHe extends AppLocalizations {
   String get navProfile => 'פרופיל';
 
   @override
+  String get navExplore => 'גלה';
+
+  @override
+  String get navLog => 'יומן';
+
+  @override
+  String get activityLog => 'יומן פעילות';
+
+  @override
   String get welcomeBack => 'ברוך שובך,';
 
   @override
@@ -799,4 +808,13 @@ class AppLocalizationsHe extends AppLocalizations {
 
   @override
   String get noUnlockedTrophiesYet => 'עדיין לא נפתחו גביעים.';
+
+  @override
+  String get mapFilterAchievements => 'הישגים';
+
+  @override
+  String get mapFilterQuests => 'משימות';
+
+  @override
+  String get mapFilterSkills => 'כישורים';
 }

@@ -105,6 +105,7 @@ const cookingQuests = <SideQuest>[
     difficulty: QuestDifficulty.medium, xpReward: 60,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    latitude: 41.903, longitude: 12.496,
   ),
   SideQuest(
     id: 'campfire-cooking', title: 'Campfire Cooking',
@@ -156,6 +157,7 @@ const hikingQuests = <SideQuest>[
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.timeBased,
     requiredSkillType: 'hiker', requiredSkillLevel: 3,
+    latitude: 46.948, longitude: 7.448,
   ),
   SideQuest(
     id: 'waterfall-trail', title: 'Waterfall Hunter',
@@ -391,6 +393,7 @@ const photographyQuests = <SideQuest>[
     difficulty: QuestDifficulty.medium, xpReward: 45,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.timeBased,
+    latitude: 48.857, longitude: 2.352,
   ),
   SideQuest(
     id: 'wildlife-shot', title: 'Wildlife Shot',
@@ -472,6 +475,7 @@ const waterSportsQuests = <SideQuest>[
     category: 'water-sports', skillType: 'surfer',
     difficulty: QuestDifficulty.medium, xpReward: 50,
     verification: VerificationMethod.photo,
+    latitude: 38.722, longitude: -9.139,
   ),
   SideQuest(
     id: 'snorkeling', title: 'Snorkeling',
@@ -633,6 +637,7 @@ const culturalQuests = <SideQuest>[
     difficulty: QuestDifficulty.easy, xpReward: 30,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    latitude: 52.520, longitude: 13.405,
   ),
   SideQuest(
     id: 'traditional-craft', title: 'Traditional Craft',
@@ -792,6 +797,7 @@ const wellnessQuests = <SideQuest>[
     difficulty: QuestDifficulty.easy, xpReward: 25,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    latitude: 37.984, longitude: 23.728,
   ),
   SideQuest(
     id: 'beach-yoga', title: 'Beach Yoga',
@@ -848,6 +854,7 @@ const nightlifeQuests = <SideQuest>[
     difficulty: QuestDifficulty.easy, xpReward: 30,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    latitude: 40.417, longitude: -3.704,
   ),
   SideQuest(
     id: 'local-club', title: 'Local Club',
@@ -911,6 +918,7 @@ const urbanQuests = <SideQuest>[
     difficulty: QuestDifficulty.easy, xpReward: 30,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    latitude: 41.387, longitude: 2.169,
   ),
   SideQuest(
     id: 'hidden-alley', title: 'Hidden Alley',

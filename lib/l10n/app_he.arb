@@ -7,6 +7,9 @@
   "navRankings": "דירוגים",
   "navAchievements": "הישגים",
   "navProfile": "פרופיל",
+  "navExplore": "גלה",
+  "navLog": "יומן",
+  "activityLog": "יומן פעילות",
 
   "welcomeBack": "ברוך שובך,",
   "levelN": "רמה {level}",
@@ -284,5 +287,9 @@
   "heatmapOther": "אחר",
 
   "unlockTimeline": "ציר זמן פתיחות",
-  "noUnlockedTrophiesYet": "עדיין לא נפתחו גביעים."
+  "noUnlockedTrophiesYet": "עדיין לא נפתחו גביעים.",
+
+  "mapFilterAchievements": "הישגים",
+  "mapFilterQuests": "משימות",
+  "mapFilterSkills": "כישורים"
 }

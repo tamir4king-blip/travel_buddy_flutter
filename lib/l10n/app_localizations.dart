@@ -134,6 +134,24 @@ abstract class AppLocalizations {
   /// **'Profile'**
   String get navProfile;
 
+  /// No description provided for @navExplore.
+  ///
+  /// In en, this message translates to:
+  /// **'Explore'**
+  String get navExplore;
+
+  /// No description provided for @navLog.
+  ///
+  /// In en, this message translates to:
+  /// **'Log'**
+  String get navLog;
+
+  /// No description provided for @activityLog.
+  ///
+  /// In en, this message translates to:
+  /// **'Activity Log'**
+  String get activityLog;
+
   /// No description provided for @welcomeBack.
   ///
   /// In en, this message translates to:
@@ -1525,6 +1543,24 @@ abstract class AppLocalizations {
   /// In en, this message translates to:
   /// **'No unlocked trophies yet.'**
   String get noUnlockedTrophiesYet;
+
+  /// No description provided for @mapFilterAchievements.
+  ///
+  /// In en, this message translates to:
+  /// **'Achievements'**
+  String get mapFilterAchievements;
+
+  /// No description provided for @mapFilterQuests.
+  ///
+  /// In en, this message translates to:
+  /// **'Quests'**
+  String get mapFilterQuests;
+
+  /// No description provided for @mapFilterSkills.
+  ///
+  /// In en, this message translates to:
+  /// **'Skills'**
+  String get mapFilterSkills;
 }
 
 class _AppLocalizationsDelegate

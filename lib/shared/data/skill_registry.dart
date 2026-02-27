@@ -10,6 +10,7 @@ const skillRegistry = <SkillGroup>[
     categories: ['hiking'],
     maxLevel: 50, xpPerLevel: 500,
     gradientStart: '#16a34a', gradientEnd: '#10b981',
+    latitude: 46.948, longitude: 7.448,
   ),
   SkillGroup(
     id: 'camper', name: 'Camper', icon: '⛺',
@@ -61,6 +62,7 @@ const skillRegistry = <SkillGroup>[
     categories: ['water-sports'],
     maxLevel: 50, xpPerLevel: 550,
     gradientStart: '#14b8a6', gradientEnd: '#22d3ee',
+    latitude: 38.722, longitude: -9.139,
   ),
   SkillGroup(
     id: 'sailor', name: 'Sailor', icon: '⛵',
@@ -158,6 +160,7 @@ const skillRegistry = <SkillGroup>[
     categories: ['cooking'],
     maxLevel: 50, xpPerLevel: 400,
     gradientStart: '#f97316', gradientEnd: '#ef4444',
+    latitude: 41.903, longitude: 12.496,
   ),
   SkillGroup(
     id: 'baker', name: 'Baker', icon: '🥐',
@@ -209,6 +212,7 @@ const skillRegistry = <SkillGroup>[
     categories: ['cultural'],
     maxLevel: 50, xpPerLevel: 400,
     gradientStart: '#b45309', gradientEnd: '#ca8a04',
+    latitude: 37.984, longitude: 23.728,
   ),
   SkillGroup(
     id: 'artist', name: 'Artist', icon: '🎨',
@@ -269,6 +273,7 @@ const skillRegistry = <SkillGroup>[
     categories: ['photography'],
     maxLevel: 50, xpPerLevel: 400,
     gradientStart: '#374151', gradientEnd: '#475569',
+    latitude: 48.857, longitude: 2.352,
   ),
   SkillGroup(
     id: 'explorer', name: 'Explorer', icon: '🧭',

@@ -4,9 +4,8 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
+import 'package:travel_buddy_mobile/features/map/models/map_marker_item.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/map_view_interface.dart';
-import 'package:travel_buddy_mobile/features/map/presentation/widgets/achievement_marker.dart';
-import 'package:travel_buddy_mobile/shared/models/achievement.dart';
 
 /// Mobile map controller using Mapbox Maps SDK.
 class PlatformMapController extends MapViewController {
@@ -15,21 +14,21 @@ class PlatformMapController extends MapViewController {
   bool _initialized = false;
 
   // Current state for rebuilds
-  List<Achievement> _achievements = [];
+  List<MapMarkerItem> _markers = [];
   double? _userLat;
   double? _userLng;
   VoidCallback? onStateChanged;
 
-  // Cache: annotation ID → achievement ID
-  final Map<String, String> _annotationToAchievement = {};
+  // Cache: annotation ID → MapMarkerItem
+  final Map<String, MapMarkerItem> _annotationToMarker = {};
 
   @override
   bool get isInitialized => _initialized;
 
   @override
-  void Function(String achievementId)? onMarkerClick;
+  void Function(String markerId, MapMarkerType type)? onMarkerClick;
 
-  List<Achievement> get achievements => _achievements;
+  List<MapMarkerItem> get markers => _markers;
   double? get userLat => _userLat;
   double? get userLng => _userLng;
 
@@ -56,8 +55,8 @@ class PlatformMapController extends MapViewController {
   }
 
   @override
-  void setMarkers(List<Achievement> achievements) {
-    _achievements = achievements;
+  void setMarkers(List<MapMarkerItem> markers) {
+    _markers = markers;
     onStateChanged?.call();
   }
 
@@ -144,8 +143,8 @@ class PlatformMapViewWidget extends StatefulWidget {
 }
 
 class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
-  // Cached marker icons per tier
-  final Map<AchievementTier, Uint8List> _tierIcons = {};
+  // Cached marker icons keyed by color ARGB32
+  final Map<int, Uint8List> _iconCache = {};
   bool _iconsReady = false;
   Cancelable? _tapCancelable;
 
@@ -165,12 +164,33 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
   }
 
   Future<void> _prepareIcons() async {
-    for (final tier in AchievementTier.values) {
-      _tierIcons[tier] =
-          await _renderMarkerIcon(AchievementMarker.tierColor(tier));
+    // Pre-render tier colors
+    final tierColors = [
+      AppColors.bronze,
+      AppColors.silver,
+      AppColors.gold,
+      AppColors.platinum,
+    ];
+    // Pre-render difficulty colors
+    final difficultyColors = [
+      AppColors.success,
+      AppColors.accent,
+      const Color(0xFFF97316),
+      const Color(0xFF9333EA),
+    ];
+    for (final color in [...tierColors, ...difficultyColors]) {
+      _iconCache[color.toARGB32()] = await _renderMarkerIcon(color);
     }
     _iconsReady = true;
     if (mounted) _syncAnnotations();
+  }
+
+  Future<Uint8List> _getIcon(Color color) async {
+    var icon = _iconCache[color.toARGB32()];
+    if (icon != null) return icon;
+    icon = await _renderMarkerIcon(color);
+    _iconCache[color.toARGB32()] = icon;
+    return icon;
   }
 
   Future<void> _syncAnnotations() async {
@@ -179,36 +199,30 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
 
     // Clear existing annotations
     await manager.deleteAll();
-    widget.controller._annotationToAchievement.clear();
+    widget.controller._annotationToMarker.clear();
 
     final ctrl = widget.controller;
-
-    final locationAchievements = ctrl.achievements
-        .where((a) => a.latitude != null && a.longitude != null)
-        .toList();
-
-    if (locationAchievements.isEmpty) return;
+    if (ctrl.markers.isEmpty) return;
 
     final options = <PointAnnotationOptions>[];
-    final achievementIds = <String>[];
+    final markerItems = <MapMarkerItem>[];
 
-    for (final a in locationAchievements) {
-      final icon = _tierIcons[a.tier];
-      if (icon == null) continue;
+    for (final item in ctrl.markers) {
+      final icon = await _getIcon(item.pinColor);
 
       options.add(PointAnnotationOptions(
-        geometry: Point(coordinates: Position(a.longitude!, a.latitude!)),
+        geometry: Point(coordinates: Position(item.longitude, item.latitude)),
         image: icon,
         iconSize: 0.5,
       ));
-      achievementIds.add(a.id);
+      markerItems.add(item);
     }
 
     final annotations = await manager.createMulti(options);
     for (var i = 0; i < annotations.length; i++) {
       final annotation = annotations[i];
       if (annotation != null) {
-        ctrl._annotationToAchievement[annotation.id] = achievementIds[i];
+        ctrl._annotationToMarker[annotation.id] = markerItems[i];
       }
     }
   }
@@ -223,16 +237,15 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
       pulsingColor: _colorToArgbInt(AppColors.info),
     ));
 
-    // Create annotation manager for achievement markers
+    // Create annotation manager for markers
     final manager = await mapboxMap.annotations.createPointAnnotationManager();
     widget.controller.setAnnotationManager(manager);
 
     // Listen for marker taps
     _tapCancelable = manager.tapEvents(onTap: (annotation) {
-      final achievementId =
-          widget.controller._annotationToAchievement[annotation.id];
-      if (achievementId != null) {
-        widget.controller.onMarkerClick?.call(achievementId);
+      final item = widget.controller._annotationToMarker[annotation.id];
+      if (item != null) {
+        widget.controller.onMarkerClick?.call(item.id, item.type);
       }
     });
 
@@ -247,13 +260,14 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
     final userLng = ctrl.userLng;
     final hasLocation = userLat != null && userLng != null;
 
-    final centerLng = hasLocation ? userLng : -122.4194;
-    final centerLat = hasLocation ? userLat : 37.7749;
+    final centerLng = hasLocation ? userLng : 0.0;
+    final centerLat = hasLocation ? userLat : 20.0;
+    final defaultZoom = hasLocation ? 12.0 : 1.0;
 
     return MapWidget(
       cameraOptions: CameraOptions(
         center: Point(coordinates: Position(centerLng, centerLat)),
-        zoom: 12,
+        zoom: defaultZoom,
       ),
       styleUri: MapboxStyles.MAPBOX_STREETS,
       onMapCreated: _onMapCreated,

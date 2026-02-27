@@ -8,6 +8,7 @@ import 'package:travel_buddy_mobile/features/quests/presentation/screens/quests_
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/profile_screen.dart';
 import 'package:travel_buddy_mobile/features/leaderboard/presentation/screens/leaderboard_screen.dart';
 import 'package:travel_buddy_mobile/features/skills/presentation/screens/skills_screen.dart';
+import 'package:travel_buddy_mobile/features/activity_log/presentation/screens/activity_log_screen.dart';
 import 'package:travel_buddy_mobile/shared/widgets/app_shell.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/edit_profile_screen.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/privacy_settings_screen.dart';
@@ -92,6 +93,12 @@ final appRouterProvider = Provider<GoRouter>((ref) {
             path: '/',
             pageBuilder: (context, state) => const NoTransitionPage(
               child: HomeScreen(),
+            ),
+          ),
+          GoRoute(
+            path: '/log',
+            pageBuilder: (context, state) => const NoTransitionPage(
+              child: ActivityLogScreen(),
             ),
           ),
           GoRoute(
