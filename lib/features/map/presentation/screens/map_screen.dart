@@ -104,6 +104,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (filter.showAchievements) {
       for (final a in achievements.allAchievements) {
         if (a.latitude != null && a.longitude != null) {
+          if (filter.selectedAchievementCollection != null &&
+              a.collectionId != filter.selectedAchievementCollection) {
+            continue;
+          }
           markers.add(AchievementMarkerItem(achievement: a));
         }
       }
@@ -113,6 +117,10 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (filter.showQuests) {
       for (final q in quests.allQuests) {
         if (q.latitude != null && q.longitude != null) {
+          if (filter.selectedQuestCategory != null &&
+              q.category != filter.selectedQuestCategory) {
+            continue;
+          }
           markers.add(QuestMarkerItem(quest: q));
         }
       }
@@ -122,6 +130,9 @@ class _MapScreenState extends ConsumerState<MapScreen> {
     if (filter.showSkills) {
       for (final s in skills.allSkills) {
         if (s.latitude != null && s.longitude != null) {
+          if (filter.selectedSkillId != null && s.id != filter.selectedSkillId) {
+            continue;
+          }
           markers.add(SkillMarkerItem(skill: s));
         }
       }

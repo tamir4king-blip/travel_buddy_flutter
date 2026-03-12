@@ -91,6 +91,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       final persistence = ref.read(persistenceServiceProvider);
       final savedAchievements = persistence.loadUnlockedAchievements();
       final savedCollections = persistence.loadCompletedCollections();
+      final pendingClaims = persistence.loadPendingClaims();
 
       // Build a map of saved data by id
       final savedMap = <String, Map<String, dynamic>>{};
@@ -101,11 +102,20 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
 
       // Merge saved state onto registry
       final merged = achievementRegistry.map((a) {
+        var achievement = a;
         final saved = savedMap[a.id];
         if (saved != null) {
-          return Achievement.fromJsonOverlay(a, saved);
+          achievement = Achievement.fromJsonOverlay(a, saved);
         }
-        return a;
+        // Restore pending claim state
+        final pendingAt = pendingClaims[a.id];
+        if (pendingAt != null && !achievement.isUnlocked) {
+          achievement = achievement.copyWith(
+            isPendingClaim: true,
+            pendingClaimAt: DateTime.parse(pendingAt),
+          );
+        }
+        return achievement;
       }).toList();
 
       state = AchievementsState(
@@ -130,7 +140,99 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
         .toList();
     persistence.saveUnlockedAchievements(unlockedJsons);
     persistence.saveCompletedCollections(state.completedCollections);
+
+    // Persist pending claims
+    final pendingClaims = <String, String>{};
+    for (final a in state.allAchievements) {
+      if (a.isPendingClaim && !a.isUnlocked && a.pendingClaimAt != null) {
+        pendingClaims[a.id] = a.pendingClaimAt!.toIso8601String();
+      }
+    }
+    persistence.savePendingClaims(pendingClaims);
   }
+
+  /// Mark an achievement as pending claim (detected nearby via background tracking).
+  /// Returns true if newly marked as pending.
+  bool markPendingClaim(String achievementId) {
+    final index =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (index == -1) return false;
+
+    final achievement = state.allAchievements[index];
+    if (achievement.isUnlocked || achievement.isPendingClaim) return false;
+
+    final pending = achievement.copyWith(
+      isPendingClaim: true,
+      pendingClaimAt: DateTime.now(),
+    );
+
+    final updatedAll = [...state.allAchievements];
+    updatedAll[index] = pending;
+
+    state = state.copyWith(allAchievements: updatedAll);
+    _persist();
+    return true;
+  }
+
+  /// Confirm a pending claim — fully unlock the achievement.
+  bool confirmPendingClaim(String achievementId) {
+    final index =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (index == -1) return false;
+
+    final achievement = state.allAchievements[index];
+    if (achievement.isUnlocked) return false;
+
+    final unlocked = achievement.copyWith(
+      isUnlocked: true,
+      unlockedAt: DateTime.now(),
+      isPendingClaim: false,
+      clearPendingClaimAt: true,
+    );
+
+    final updatedAll = [...state.allAchievements];
+    updatedAll[index] = unlocked;
+
+    // Check for collection completion
+    final collectionId = achievement.collectionId;
+    var completedCollections = Set<String>.from(state.completedCollections);
+    String? newlyCompletedCollection;
+
+    if (collectionId != null && !completedCollections.contains(collectionId)) {
+      final collectionAchievements =
+          updatedAll.where((a) => a.collectionId == collectionId).toList();
+      final allUnlocked = collectionAchievements.every((a) => a.isUnlocked);
+      if (allUnlocked) {
+        completedCollections.add(collectionId);
+        newlyCompletedCollection = collectionId;
+      }
+    }
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements: [...state.unlockedAchievements, unlocked],
+      completedCollections: completedCollections,
+    );
+
+    // Award XP
+    ref.read(userProfileProvider.notifier).addXp(achievement.xpReward);
+
+    // Award collection bonus XP if newly completed
+    if (newlyCompletedCollection != null) {
+      _lastCompletedCollection = newlyCompletedCollection;
+      final bonusXp = _collectionBonusXp(newlyCompletedCollection);
+      if (bonusXp > 0) {
+        ref.read(userProfileProvider.notifier).addXp(bonusXp);
+      }
+    }
+
+    _persist();
+    return true;
+  }
+
+  /// Get all achievements with pending claims.
+  List<Achievement> get pendingClaims =>
+      state.allAchievements.where((a) => a.isPendingClaim && !a.isUnlocked).toList();
 
   void setTierFilter(AchievementTier? tier) {
     if (tier == state.filterTier) {
@@ -604,6 +706,202 @@ final achievementRegistry = <Achievement>[
     claimRadius: 300,
     collectionId: 'culture',
     tags: ['culture', 'shopping', 'entertainment'],
+  ),
+  // ── More Landmarks ──
+  Achievement(
+    id: 'netanya-stadium',
+    title: 'Netanya Stadium',
+    description: 'Visit the home of Maccabi Netanya FC and its surrounding sports complex',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3100,
+    longitude: 34.8620,
+    claimRadius: 300,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'sports'],
+  ),
+  Achievement(
+    id: 'seasons-lookout',
+    title: 'Seasons Cliff Lookout',
+    description: 'Take in the breathtaking view from the lookout near the Seasons Hotel',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3268,
+    longitude: 34.8478,
+    claimRadius: 150,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'scenic', 'coastal'],
+  ),
+  Achievement(
+    id: 'founders-monument',
+    title: 'Founders Monument',
+    description: 'Visit the monument commemorating the founders of Netanya',
+    tier: AchievementTier.bronze,
+    xpReward: 10,
+    latitude: 32.3285,
+    longitude: 34.8540,
+    claimRadius: 150,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'history'],
+  ),
+  Achievement(
+    id: 'old-train-station',
+    title: 'Old Netanya Train Station',
+    description: 'Discover the historic train station and its surrounding area',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3260,
+    longitude: 34.8590,
+    claimRadius: 200,
+    collectionId: 'landmarks',
+    tags: ['landmarks', 'history', 'transportation'],
+  ),
+  // ── More Beaches ──
+  Achievement(
+    id: 'kontiki-beach',
+    title: 'Kontiki Beach',
+    description: 'Relax at the charming Kontiki Beach with its laid-back atmosphere',
+    tier: AchievementTier.bronze,
+    xpReward: 10,
+    latitude: 32.3210,
+    longitude: 34.8460,
+    claimRadius: 300,
+    collectionId: 'beaches',
+    tags: ['beaches', 'relaxation'],
+  ),
+  Achievement(
+    id: 'haonot-beach',
+    title: 'HaOnot Beach',
+    description: 'Visit HaOnot Beach tucked between the dramatic cliff inlets',
+    tier: AchievementTier.bronze,
+    xpReward: 10,
+    latitude: 32.3350,
+    longitude: 34.8468,
+    claimRadius: 250,
+    collectionId: 'beaches',
+    tags: ['beaches', 'cliffs', 'scenic'],
+  ),
+  Achievement(
+    id: 'beit-yanai',
+    title: 'Beit Yanai Beach',
+    description: 'Discover the scenic Beit Yanai Beach at the Alexander Stream estuary',
+    tier: AchievementTier.gold,
+    xpReward: 35,
+    latitude: 32.3890,
+    longitude: 34.8580,
+    claimRadius: 400,
+    collectionId: 'beaches',
+    tags: ['beaches', 'nature', 'river'],
+  ),
+  Achievement(
+    id: 'mikhmoret-beach',
+    title: 'Mikhmoret Beach',
+    description: 'Explore the unspoiled Mikhmoret Beach north of Netanya',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3950,
+    longitude: 34.8520,
+    claimRadius: 400,
+    collectionId: 'beaches',
+    tags: ['beaches', 'quiet', 'nature'],
+  ),
+  // ── More Parks ──
+  Achievement(
+    id: 'poleg-reserve',
+    title: 'Poleg Stream Nature Reserve',
+    description: 'Hike through the lush Poleg Stream nature reserve and its wetlands',
+    tier: AchievementTier.gold,
+    xpReward: 35,
+    latitude: 32.2900,
+    longitude: 34.8450,
+    claimRadius: 400,
+    collectionId: 'parks',
+    tags: ['parks', 'nature', 'hiking', 'wildlife'],
+  ),
+  Achievement(
+    id: 'ramat-poleg-park',
+    title: 'Ramat Poleg Park',
+    description: 'Enjoy the open green spaces and playgrounds of Ramat Poleg',
+    tier: AchievementTier.bronze,
+    xpReward: 10,
+    latitude: 32.2920,
+    longitude: 34.8520,
+    claimRadius: 300,
+    collectionId: 'parks',
+    tags: ['parks', 'recreation', 'family'],
+  ),
+  Achievement(
+    id: 'iris-reserve',
+    title: 'Iris Nature Reserve',
+    description: 'Visit the rare coastal iris reserve, home to endangered Iris atropurpurea',
+    tier: AchievementTier.platinum,
+    xpReward: 50,
+    latitude: 32.3050,
+    longitude: 34.8650,
+    claimRadius: 350,
+    collectionId: 'parks',
+    tags: ['parks', 'nature', 'wildlife', 'rare'],
+  ),
+  // ── More Culture ──
+  Achievement(
+    id: 'netanya-gallery',
+    title: 'Netanya Municipal Gallery',
+    description: 'Browse contemporary art exhibitions at the municipal gallery',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3295,
+    longitude: 34.8548,
+    claimRadius: 150,
+    collectionId: 'culture',
+    tags: ['culture', 'art', 'museum'],
+  ),
+  Achievement(
+    id: 'cliff-sculptures',
+    title: 'Cliff-top Sculpture Garden',
+    description: 'Walk among the open-air sculptures along the cliff promenade',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3260,
+    longitude: 34.8490,
+    claimRadius: 250,
+    collectionId: 'culture',
+    tags: ['culture', 'art', 'outdoor'],
+  ),
+  Achievement(
+    id: 'diamond-center',
+    title: 'Diamond Industry Center',
+    description: 'Learn about Netanya\'s historic diamond polishing industry',
+    tier: AchievementTier.gold,
+    xpReward: 35,
+    latitude: 32.3180,
+    longitude: 34.8580,
+    claimRadius: 250,
+    collectionId: 'culture',
+    tags: ['culture', 'history', 'industry'],
+  ),
+  Achievement(
+    id: 'havatzelet',
+    title: 'Havatzelet HaSharon',
+    description: 'Explore the historic Havatzelet HaSharon village, one of the oldest settlements in the Sharon plain',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3600,
+    longitude: 34.8530,
+    claimRadius: 300,
+    collectionId: 'culture',
+    tags: ['culture', 'history', 'village'],
+  ),
+  Achievement(
+    id: 'bialik-street',
+    title: 'Bialik Cultural Street',
+    description: 'Stroll down Bialik Street with its cafes, shops, and cultural vibe',
+    tier: AchievementTier.bronze,
+    xpReward: 10,
+    latitude: 32.3300,
+    longitude: 34.8555,
+    claimRadius: 200,
+    collectionId: 'culture',
+    tags: ['culture', 'shopping', 'food'],
   ),
   // ── Travel Achievements ──
   ...travelAchievementRegistry,

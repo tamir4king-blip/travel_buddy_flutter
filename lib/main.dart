@@ -13,6 +13,8 @@ import 'package:travel_buddy_mobile/shared/services/notification_service.dart';
 import 'package:travel_buddy_mobile/shared/providers/persistence_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/notification_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/locale_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/nearby_achievements_provider.dart';
 
 const _mapboxToken = String.fromEnvironment('MAPBOX_TOKEN');
 
@@ -32,7 +34,7 @@ void main() async {
       );
       SupabaseConfig.initialized = true;
     } catch (_) {
-      // Supabase init failed — app will still work with local-only mode
+      // Supabase init failed -- app will still work with local-only mode
     }
   }
 
@@ -42,22 +44,77 @@ void main() async {
   final notificationService = NotificationService();
   await notificationService.init();
 
+  // Check if live tracking was enabled before app closed
+  final shouldRestoreTracking = persistenceService.loadLiveTracking();
+
   runApp(
     ProviderScope(
       overrides: [
         persistenceServiceProvider.overrideWithValue(persistenceService),
         notificationServiceProvider.overrideWithValue(notificationService),
       ],
-      child: const TravelBuddyApp(),
+      child: TravelBuddyApp(restoreTracking: shouldRestoreTracking),
     ),
   );
 }
 
-class TravelBuddyApp extends ConsumerWidget {
-  const TravelBuddyApp({super.key});
+class TravelBuddyApp extends ConsumerStatefulWidget {
+  final bool restoreTracking;
+  const TravelBuddyApp({super.key, this.restoreTracking = false});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<TravelBuddyApp> createState() => _TravelBuddyAppState();
+}
+
+class _TravelBuddyAppState extends ConsumerState<TravelBuddyApp>
+    with WidgetsBindingObserver {
+  bool _trackingRestored = false;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+
+    // Restore live tracking after first frame
+    if (widget.restoreTracking) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        _restoreTracking();
+      });
+    }
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  Future<void> _restoreTracking() async {
+    if (_trackingRestored) return;
+    _trackingRestored = true;
+
+    final geoNotifier = ref.read(geolocationProvider.notifier);
+    await geoNotifier.startTracking();
+
+    // Force the nearby achievements provider to initialize
+    // so it starts checking proximity immediately
+    ref.read(nearbyAchievementsProvider);
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // When app returns to foreground, re-check proximity
+    if (state == AppLifecycleState.resumed) {
+      final geo = ref.read(geolocationProvider);
+      if (geo.isLiveTracking) {
+        // Trigger a recomputation of nearby achievements
+        ref.read(nearbyAchievementsProvider);
+      }
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final locale = ref.watch(localeProvider);
     final router = ref.watch(appRouterProvider);
 

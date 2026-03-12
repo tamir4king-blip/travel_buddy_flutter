@@ -2,6 +2,8 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:travel_buddy_mobile/shared/models/achievement.dart';
 import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/notification_provider.dart';
+import 'package:travel_buddy_mobile/shared/services/notification_service.dart';
 
 class NearbyAchievementsState {
   final List<Achievement> nearby;
@@ -50,6 +52,34 @@ class NearbyAchievementsNotifier extends StateNotifier<NearbyAchievementsState> 
     _previouslyNearby
       ..clear()
       ..addAll(nearbyIds);
+
+    // Auto-mark newly discovered achievements as pending claims
+    // and send phone notifications
+    if (newlyDiscovered.isNotEmpty && geo.isLiveTracking) {
+      final achievementsNotifier = _ref.read(achievementsProvider.notifier);
+      final notificationsEnabled = _ref.read(notificationsEnabledProvider);
+      NotificationService? notificationService;
+      try {
+        notificationService = _ref.read(notificationServiceProvider);
+      } catch (_) {
+        // Provider not yet available
+      }
+
+      for (final achievement in newlyDiscovered) {
+        // Skip if already pending
+        if (achievement.isPendingClaim) continue;
+
+        final wasMarked = achievementsNotifier.markPendingClaim(achievement.id);
+        if (wasMarked && notificationsEnabled && notificationService != null) {
+          final distance = geo.distanceTo(achievement.latitude!, achievement.longitude!);
+          notificationService.showProximityNotification(
+            id: achievement.hashCode,
+            title: 'Trophy nearby: ${achievement.title}',
+            body: '${distance.round()}m away - ${achievement.xpReward} XP! Open the app to claim it.',
+          );
+        }
+      }
+    }
 
     state = NearbyAchievementsState(
       nearby: nearby,

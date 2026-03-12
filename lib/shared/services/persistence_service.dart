@@ -19,6 +19,7 @@ class PersistenceService {
   static const _keyLocale = 'app_locale';
   static const _keyLiveTracking = 'live_tracking';
   static const _keyNotifications = 'notifications_enabled';
+  static const _keyPendingClaims = 'pending_claims';
 
   // --- User Profile ---
 
@@ -158,6 +159,19 @@ class PersistenceService {
     return _prefs.getBool(_keyNotifications) ?? true;
   }
 
+  // --- Pending Claims ---
+
+  Future<void> savePendingClaims(Map<String, String> pendingClaims) async {
+    await _prefs.setString(_keyPendingClaims, jsonEncode(pendingClaims));
+  }
+
+  Map<String, String> loadPendingClaims() {
+    final raw = _prefs.getString(_keyPendingClaims);
+    if (raw == null) return {};
+    final map = jsonDecode(raw) as Map<String, dynamic>;
+    return map.map((k, v) => MapEntry(k, v as String));
+  }
+
   // --- Clear All ---
 
   Future<void> clearAll() async {
@@ -172,5 +186,6 @@ class PersistenceService {
     await _prefs.remove(_keyLocale);
     await _prefs.remove(_keyLiveTracking);
     await _prefs.remove(_keyNotifications);
+    await _prefs.remove(_keyPendingClaims);
   }
 }

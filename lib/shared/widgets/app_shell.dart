@@ -11,10 +11,8 @@ import 'package:travel_buddy_mobile/features/home/presentation/screens/home_scre
 import 'package:travel_buddy_mobile/features/leaderboard/presentation/screens/leaderboard_screen.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/screens/map_screen.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/profile_screen.dart';
-import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/nearby_achievements_provider.dart';
-import 'package:travel_buddy_mobile/shared/providers/notification_provider.dart';
 import 'package:travel_buddy_mobile/shared/widgets/proximity_alert.dart';
 
 class AppShell extends ConsumerStatefulWidget {
@@ -356,6 +354,9 @@ class _AppShellState extends ConsumerState<AppShell>
     final nearbyState = ref.watch(nearbyAchievementsProvider);
     final selectedIndex = _currentIndex(context);
 
+    // Listen for newly discovered achievements — show in-app alert banner.
+    // Notifications and pending claim marking are handled by the
+    // nearbyAchievementsProvider itself, so we only drive the UI here.
     ref.listen(nearbyAchievementsProvider, (prev, next) {
       if (!geo.isLiveTracking) return;
       if (next.newlyDiscovered.isNotEmpty) {
@@ -363,17 +364,6 @@ class _AppShellState extends ConsumerState<AppShell>
         setState(() {
           _alertAchievementId = achievement.id;
         });
-
-        if (ref.read(notificationsEnabledProvider)) {
-          final distance = geo.hasLocation
-              ? geo.distanceTo(achievement.latitude!, achievement.longitude!)
-              : 0.0;
-          ref.read(notificationServiceProvider).showProximityNotification(
-                id: achievement.hashCode,
-                title: achievement.title,
-                body: '${distance.round()}m away · ${achievement.xpReward} XP',
-              );
-        }
 
         Future.delayed(const Duration(seconds: 8), () {
           if (mounted && _alertAchievementId == achievement.id) {
@@ -674,13 +664,7 @@ class _AppShellState extends ConsumerState<AppShell>
                           alertAchievement.longitude!)
                       : 0,
                   onClaim: () {
-                    ref
-                        .read(achievementsProvider.notifier)
-                        .claimAchievement(
-                          alertAchievement.id,
-                          userLat: geo.latitude,
-                          userLng: geo.longitude,
-                        );
+                    // Dismiss the alert — claiming happens on the achievements page
                     setState(() => _alertAchievementId = null);
                   },
                   onDismiss: () {
@@ -779,31 +763,63 @@ class _AppShellState extends ConsumerState<AppShell>
     required int selectedIndex,
   }) {
     final isSelected = index == selectedIndex && !_isExploreMode;
+    const duration = Duration(milliseconds: 250);
+    const curve = Curves.easeOutCubic;
+    final activeColor = AppColors.primaryLight;
+    final inactiveColor = AppColors.textMuted.withValues(alpha: 0.6);
+
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () => _onDestinationSelected(context, index),
       child: Column(
         mainAxisAlignment: MainAxisAlignment.center,
         children: [
-          Icon(
-            icon,
-            size: isSelected ? 22 : 20,
-            color: isSelected
-                ? AppColors.primaryLight
-                : AppColors.textMuted.withValues(alpha: 0.6),
+          // Selection indicator dot
+          AnimatedContainer(
+            duration: duration,
+            curve: curve,
+            width: isSelected ? 16 : 0,
+            height: 3,
+            margin: const EdgeInsets.only(bottom: 6),
+            decoration: BoxDecoration(
+              color: isSelected ? activeColor : Colors.transparent,
+              borderRadius: BorderRadius.circular(1.5),
+            ),
           ),
-          const SizedBox(height: 4),
-          Text(
-            label,
+          // Animated icon with scale
+          TweenAnimationBuilder<double>(
+            tween: Tween(end: isSelected ? 1.15 : 1.0),
+            duration: duration,
+            curve: curve,
+            builder: (context, scale, child) => Transform.scale(
+              scale: scale,
+              child: child,
+            ),
+            child: AnimatedSwitcher(
+              duration: const Duration(milliseconds: 200),
+              child: Icon(
+                icon,
+                key: ValueKey(isSelected),
+                size: 20,
+                color: isSelected ? activeColor : inactiveColor,
+              ),
+            ),
+          ),
+          const SizedBox(height: 3),
+          AnimatedDefaultTextStyle(
+            duration: duration,
+            curve: curve,
             style: TextStyle(
               fontSize: 10,
               fontWeight: isSelected ? FontWeight.w600 : FontWeight.w400,
-              color: isSelected
-                  ? AppColors.primaryLight
-                  : AppColors.textMuted.withValues(alpha: 0.6),
+              color: isSelected ? activeColor : inactiveColor,
+              decoration: TextDecoration.none,
             ),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
+            child: Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
           ),
         ],
       ),
@@ -813,58 +829,77 @@ class _AppShellState extends ConsumerState<AppShell>
   Widget _buildExploreButton(
       BuildContext context, AppLocalizations l10n, double navBarHeight) {
     const buttonSize = 56.0;
+    const duration = Duration(milliseconds: 280);
+    const curve = Curves.easeOutCubic;
 
     return GestureDetector(
       onTap: () => _toggleExploreMode(context, navBarHeight),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          AnimatedContainer(
-            duration: const Duration(milliseconds: 200),
-            width: buttonSize,
-            height: buttonSize,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              gradient: _isExploreMode
-                  ? const LinearGradient(
-                      colors: [AppColors.primary, AppColors.cyan],
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                    )
-                  : null,
-              color: _isExploreMode ? null : AppColors.bgCardLight,
-              boxShadow: _isExploreMode
-                  ? [
-                      BoxShadow(
-                        color: AppColors.primary.withValues(alpha: 0.4),
-                        blurRadius: 12,
-                        spreadRadius: 2,
-                      ),
-                    ]
-                  : [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.3),
-                        blurRadius: 6,
-                        offset: const Offset(0, 2),
-                      ),
-                    ],
+          TweenAnimationBuilder<double>(
+            tween: Tween(end: _isExploreMode ? 1.1 : 1.0),
+            duration: duration,
+            curve: curve,
+            builder: (context, scale, child) => Transform.scale(
+              scale: scale,
+              child: child,
             ),
-            child: Icon(
-              LucideIcons.globe,
-              size: 26,
-              color: _isExploreMode ? Colors.white : AppColors.textMuted,
+            child: AnimatedContainer(
+              duration: duration,
+              curve: curve,
+              width: buttonSize,
+              height: buttonSize,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                gradient: _isExploreMode
+                    ? const LinearGradient(
+                        colors: [AppColors.primary, AppColors.cyan],
+                        begin: Alignment.topLeft,
+                        end: Alignment.bottomRight,
+                      )
+                    : null,
+                color: _isExploreMode ? null : AppColors.bgCardLight,
+                boxShadow: _isExploreMode
+                    ? [
+                        BoxShadow(
+                          color: AppColors.primary.withValues(alpha: 0.4),
+                          blurRadius: 12,
+                          spreadRadius: 2,
+                        ),
+                      ]
+                    : [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.3),
+                          blurRadius: 6,
+                          offset: const Offset(0, 2),
+                        ),
+                      ],
+              ),
+              child: AnimatedSwitcher(
+                duration: const Duration(milliseconds: 200),
+                child: Icon(
+                  LucideIcons.globe,
+                  key: ValueKey(_isExploreMode),
+                  size: 26,
+                  color: _isExploreMode ? Colors.white : AppColors.textMuted,
+                ),
+              ),
             ),
           ),
           const SizedBox(height: 4),
-          Text(
-            l10n.navExplore,
+          AnimatedDefaultTextStyle(
+            duration: duration,
+            curve: curve,
             style: TextStyle(
               fontSize: 10,
               fontWeight: _isExploreMode ? FontWeight.w600 : FontWeight.w400,
               color: _isExploreMode
                   ? AppColors.primaryLight
                   : AppColors.textMuted.withValues(alpha: 0.6),
+              decoration: TextDecoration.none,
             ),
+            child: Text(l10n.navExplore),
           ),
         ],
       ),

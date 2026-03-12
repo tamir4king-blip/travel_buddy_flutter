@@ -167,6 +167,8 @@ class _AchievementsScreenState extends ConsumerState<AchievementsScreen>
                 ),
               ),
             ),
+            // ── Pending Claims Banner ──
+            _PendingClaimsBanner(),
             const SizedBox(height: 16),
             // ── Tab bar ──
             _buildTabBar(categories),
@@ -2667,5 +2669,151 @@ class _AchievementRow extends StatelessWidget {
         ),
       ),
     ).animate().fadeIn(duration: 300.ms, delay: (index * 40).ms).slideX(begin: 0.03);
+  }
+}
+
+// ── Pending Claims Banner ──
+
+class _PendingClaimsBanner extends ConsumerWidget {
+  const _PendingClaimsBanner();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final achievements = ref.watch(achievementsProvider);
+    final pending = achievements.allAchievements
+        .where((a) => a.isPendingClaim && !a.isUnlocked)
+        .toList();
+
+    if (pending.isEmpty) return const SizedBox.shrink();
+
+    final locale = Localizations.localeOf(context);
+
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+      child: Container(
+        decoration: BoxDecoration(
+          gradient: LinearGradient(
+            colors: [
+              AppColors.gold.withValues(alpha: 0.15),
+              AppColors.accent.withValues(alpha: 0.08),
+            ],
+          ),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(
+            color: AppColors.gold.withValues(alpha: 0.4),
+          ),
+        ),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+              child: Row(
+                children: [
+                  Icon(LucideIcons.bell, size: 16, color: AppColors.gold),
+                  const SizedBox(width: 8),
+                  Text(
+                    '${pending.length} ${pending.length == 1 ? 'trophy' : 'trophies'} ready to claim!',
+                    style: TextStyle(
+                      color: AppColors.gold,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            SizedBox(
+              height: 68,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                itemCount: pending.length,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  final achievement = pending[index];
+                  return _PendingClaimChip(
+                    achievement: achievement,
+                    locale: locale,
+                    onClaim: () {
+                      ref
+                          .read(achievementsProvider.notifier)
+                          .confirmPendingClaim(achievement.id);
+                    },
+                  );
+                },
+              ),
+            ),
+          ],
+        ),
+      ),
+    ).animate().fadeIn(duration: 300.ms).slideY(begin: -0.1);
+  }
+}
+
+class _PendingClaimChip extends StatelessWidget {
+  final Achievement achievement;
+  final Locale locale;
+  final VoidCallback onClaim;
+
+  const _PendingClaimChip({
+    required this.achievement,
+    required this.locale,
+    required this.onClaim,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+      decoration: BoxDecoration(
+        color: AppColors.bgCardLight,
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(
+          color: AppColors.gold.withValues(alpha: 0.3),
+        ),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(LucideIcons.trophy, size: 16, color: AppColors.gold),
+          const SizedBox(width: 8),
+          ConstrainedBox(
+            constraints: const BoxConstraints(maxWidth: 120),
+            child: Text(
+              RegistryL10n.achievementTitle(locale, achievement.id, achievement.title),
+              style: const TextStyle(
+                color: AppColors.textPrimary,
+                fontWeight: FontWeight.w600,
+                fontSize: 12,
+              ),
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          const SizedBox(width: 8),
+          GestureDetector(
+            onTap: onClaim,
+            child: Container(
+              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+              decoration: BoxDecoration(
+                gradient: const LinearGradient(
+                  colors: [AppColors.primary, AppColors.primaryLight],
+                ),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: const Text(
+                'Claim',
+                style: TextStyle(
+                  color: Colors.white,
+                  fontWeight: FontWeight.w700,
+                  fontSize: 11,
+                ),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
   }
 }
