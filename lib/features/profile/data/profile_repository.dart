@@ -3,10 +3,10 @@ import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:travel_buddy_mobile/shared/models/user_profile.dart';
 import 'package:path/path.dart' as path;
 
-class ProfileSyncService {
+class ProfileRepository {
   final SupabaseClient _client;
 
-  ProfileSyncService(this._client);
+  ProfileRepository(this._client);
 
   /// Uploads an avatar image to Supabase Storage.
   /// Returns the public URL on success, or the [localFilePath] as-is in demo mode.
