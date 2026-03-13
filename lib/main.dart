@@ -11,6 +11,8 @@ import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/core/router/app_router.dart';
 import 'package:travel_buddy_mobile/shared/services/persistence_service.dart';
 import 'package:travel_buddy_mobile/shared/services/notification_service.dart';
+import 'package:travel_buddy_mobile/shared/services/background_service.dart';
+import 'package:travel_buddy_mobile/shared/services/permission_service.dart';
 import 'package:travel_buddy_mobile/shared/providers/persistence_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/notification_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/locale_provider.dart';
@@ -18,6 +20,7 @@ import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/nearby_achievements_provider.dart';
 
 const _mapboxToken = String.fromEnvironment('MAPBOX_TOKEN');
+const _keyPermissionsRequested = 'permissions_requested';
 
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
@@ -44,6 +47,22 @@ Future<void> main() async {
 
   final notificationService = NotificationService();
   await notificationService.init();
+
+  // Request permissions on first launch
+  final permissionService = PermissionService();
+  final alreadyRequested = prefs.getBool(_keyPermissionsRequested) ?? false;
+  if (!alreadyRequested) {
+    await permissionService.requestLocationPermission();
+    await permissionService.requestBackgroundLocationPermission();
+    await permissionService.requestNotificationPermission();
+    await prefs.setBool(_keyPermissionsRequested, true);
+  }
+
+  // Initialize and start background service if permissions are granted
+  await BackgroundService.initialize();
+  if (await permissionService.hasAllPermissions()) {
+    await BackgroundService.start();
+  }
 
   // Check if live tracking was enabled before app closed
   final shouldRestoreTracking = persistenceService.loadLiveTracking();
