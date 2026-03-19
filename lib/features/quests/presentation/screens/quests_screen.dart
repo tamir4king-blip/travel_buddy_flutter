@@ -20,12 +20,17 @@ class QuestsScreen extends ConsumerStatefulWidget {
   ConsumerState<QuestsScreen> createState() => _QuestsScreenState();
 }
 
-class _QuestsScreenState extends ConsumerState<QuestsScreen> {
+class _QuestsScreenState extends ConsumerState<QuestsScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   /// Currently selected super-category filter (null = all).
   String? _superCategoryFilter;
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final l10n = AppLocalizations.of(context)!;
     final locale = Localizations.localeOf(context);
     final state = ref.watch(questsProvider);

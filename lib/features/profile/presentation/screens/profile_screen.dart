@@ -23,11 +23,21 @@ import 'package:travel_buddy_mobile/features/profile/presentation/widgets/recent
 import 'package:travel_buddy_mobile/shared/widgets/visual_extras.dart';
 import 'package:travel_buddy_mobile/features/dev_panel/presentation/widgets/dev_entry_gesture.dart';
 
-class ProfileScreen extends ConsumerWidget {
+class ProfileScreen extends ConsumerStatefulWidget {
   const ProfileScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ProfileScreen> createState() => _ProfileScreenState();
+}
+
+class _ProfileScreenState extends ConsumerState<ProfileScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
+  @override
+  Widget build(BuildContext context) {
+    super.build(context);
     final l10n = AppLocalizations.of(context)!;
     final user = ref.watch(userProfileProvider);
     final achievements = ref.watch(achievementsProvider);

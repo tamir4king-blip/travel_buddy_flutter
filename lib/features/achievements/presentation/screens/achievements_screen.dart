@@ -13,7 +13,9 @@ import 'package:travel_buddy_mobile/shared/models/achievement.dart';
 import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
 import 'package:travel_buddy_mobile/features/achievements/presentation/widgets/retroactive_claim_modal.dart';
+import 'package:travel_buddy_mobile/features/achievements/presentation/widgets/achievement_detail_sheet.dart';
 import 'package:travel_buddy_mobile/shared/widgets/responsive_layout.dart';
+import 'package:travel_buddy_mobile/shared/widgets/achievement_unlock_popup.dart';
 import 'package:travel_buddy_mobile/shared/widgets/collection_complete_dialog.dart';
 import 'package:travel_buddy_mobile/shared/widgets/visual_extras.dart';
 import 'package:travel_buddy_mobile/shared/data/country_details_registry.dart';
@@ -50,7 +52,9 @@ class AchievementsScreen extends ConsumerStatefulWidget {
 }
 
 class _AchievementsScreenState extends ConsumerState<AchievementsScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   late TabController _tabController;
 
   static List<_CategoryTab> _getCategories(AppLocalizations l10n) => [
@@ -124,6 +128,7 @@ class _AchievementsScreenState extends ConsumerState<AchievementsScreen>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final l10n = AppLocalizations.of(context)!;
     final state = ref.watch(achievementsProvider);
     final geo = ref.watch(geolocationProvider);
@@ -808,175 +813,31 @@ class _CategoryPageState extends ConsumerState<_CategoryPage> {
     final result = await RetroactiveClaimModal.show(context, achievement);
     bool claimed;
     if (result == null) {
-      claimed = notifier.claimAchievement(
+      claimed = await notifier.claimAchievement(
         achievement.id,
         userLat: geo.latitude,
         userLng: geo.longitude,
       );
     } else {
-      claimed = notifier.claimAchievement(
+      claimed = await notifier.claimAchievement(
         achievement.id,
         retroactiveData: result,
       );
     }
     if (claimed && context.mounted) {
-      final completedCollection = notifier.lastCompletedCollection;
-      if (completedCollection != null) {
-        notifier.clearLastCompletedCollection();
-        await CollectionCompleteDialog.show(context, completedCollection);
+      await AchievementUnlockPopup.show(context, achievement);
+      if (context.mounted) {
+        final completedCollection = notifier.lastCompletedCollection;
+        if (completedCollection != null) {
+          notifier.clearLastCompletedCollection();
+          await CollectionCompleteDialog.show(context, completedCollection);
+        }
       }
     }
   }
 
   void _showDetail(BuildContext context, Achievement achievement) {
-    final l10n = AppLocalizations.of(context)!;
-    final locale = Localizations.localeOf(context);
-
-    final tierColor = switch (achievement.tier) {
-      AchievementTier.bronze => AppColors.bronze,
-      AchievementTier.silver => AppColors.silver,
-      AchievementTier.gold => AppColors.gold,
-      AchievementTier.platinum => AppColors.platinum,
-    };
-
-    final tierLabel = switch (achievement.tier) {
-      AchievementTier.bronze => l10n.tierBronzeLabel,
-      AchievementTier.silver => l10n.tierSilverLabel,
-      AchievementTier.gold => l10n.tierGoldLabel,
-      AchievementTier.platinum => l10n.tierPlatinumLabel,
-    };
-
-    showModalBottomSheet(
-      context: context,
-      backgroundColor: AppColors.bgCard,
-      shape: const RoundedRectangleBorder(
-        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
-      ),
-      builder: (context) => Padding(
-        padding: const EdgeInsets.fromLTRB(24, 16, 24, 32),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            Container(
-              width: 40,
-              height: 4,
-              decoration: BoxDecoration(
-                color: AppColors.textMuted.withValues(alpha: 0.3),
-                borderRadius: BorderRadius.circular(2),
-              ),
-            ),
-            const SizedBox(height: 24),
-            Container(
-              padding: const EdgeInsets.all(5),
-              decoration: BoxDecoration(
-                color: AppColors.success,
-                shape: BoxShape.circle,
-                border: Border.all(color: AppColors.bgCard, width: 2),
-              ),
-              child: const Icon(LucideIcons.check, size: 20, color: Colors.white),
-            ),
-            const SizedBox(height: 16),
-            Text(
-              RegistryL10n.achievementTitle(locale, achievement.id, achievement.title),
-              textAlign: TextAlign.center,
-              style: const TextStyle(fontSize: 20, fontWeight: FontWeight.w700),
-            ),
-            const SizedBox(height: 8),
-            Text(
-              RegistryL10n.achievementDescription(locale, achievement.id, achievement.description),
-              textAlign: TextAlign.center,
-              style: TextStyle(color: AppColors.textSecondary, fontSize: 14, height: 1.4),
-            ),
-            const SizedBox(height: 20),
-            Row(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: tierColor.withValues(alpha: 0.15),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: tierColor.withValues(alpha: 0.3)),
-                  ),
-                  child: Text(
-                    tierLabel,
-                    style: TextStyle(
-                      color: tierColor,
-                      fontSize: 11,
-                      fontWeight: FontWeight.w800,
-                      letterSpacing: 1.2,
-                    ),
-                  ),
-                ),
-                const SizedBox(width: 12),
-                Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                  decoration: BoxDecoration(
-                    color: AppColors.xpGreen.withValues(alpha: 0.1),
-                    borderRadius: BorderRadius.circular(10),
-                    border: Border.all(color: AppColors.xpGreen.withValues(alpha: 0.3)),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(LucideIcons.zap, size: 12, color: AppColors.xpGreen),
-                      const SizedBox(width: 4),
-                      Text(
-                        '+${achievement.xpReward} XP',
-                        style: TextStyle(
-                          color: AppColors.xpGreen,
-                          fontWeight: FontWeight.w700,
-                          fontSize: 13,
-                        ),
-                      ),
-                    ],
-                  ),
-                ),
-              ],
-            ),
-            if (achievement.unlockedAt != null) ...[
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Icon(LucideIcons.calendarCheck, size: 14, color: AppColors.success.withValues(alpha: 0.7)),
-                  const SizedBox(width: 6),
-                  Text(
-                    l10n.unlockedOn(
-                      DateFormat.yMMMd(locale.languageCode).format(achievement.unlockedAt!),
-                    ),
-                    style: TextStyle(
-                      color: AppColors.success.withValues(alpha: 0.8),
-                      fontSize: 13,
-                      fontWeight: FontWeight.w500,
-                    ),
-                  ),
-                ],
-              ),
-            ],
-            if (achievement.notes != null && achievement.notes!.isNotEmpty) ...[
-              const SizedBox(height: 16),
-              Container(
-                width: double.infinity,
-                padding: const EdgeInsets.all(14),
-                decoration: BoxDecoration(
-                  color: AppColors.bgCardLight.withValues(alpha: 0.5),
-                  borderRadius: BorderRadius.circular(12),
-                ),
-                child: Text(
-                  achievement.notes!,
-                  style: TextStyle(
-                    color: AppColors.textSecondary,
-                    fontSize: 13,
-                    fontStyle: FontStyle.italic,
-                  ),
-                ),
-              ),
-            ],
-          ],
-        ),
-      ),
-    );
+    AchievementDetailSheet.show(context, achievement);
   }
 }
 
@@ -2735,10 +2596,14 @@ class _PendingClaimsBanner extends ConsumerWidget {
                   return _PendingClaimChip(
                     achievement: achievement,
                     locale: locale,
-                    onClaim: () {
-                      ref
+                    onClaim: () async {
+                      final claimed = await ref
                           .read(achievementsProvider.notifier)
                           .confirmPendingClaim(achievement.id);
+                      if (claimed && context.mounted) {
+                        await AchievementUnlockPopup.show(
+                            context, achievement);
+                      }
                     },
                   );
                 },

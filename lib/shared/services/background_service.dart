@@ -12,7 +12,26 @@ import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart'
 class BackgroundService {
   static final FlutterBackgroundService _service = FlutterBackgroundService();
 
+  /// Creates the notification channel before the service starts.
+  /// Required on Android 8+ and strictly enforced on Android 16.
+  static Future<void> _ensureNotificationChannel() async {
+    final plugin = FlutterLocalNotificationsPlugin();
+    final android = plugin.resolvePlatformSpecificImplementation<
+        AndroidFlutterLocalNotificationsPlugin>();
+    if (android == null) return;
+
+    const channel = AndroidNotificationChannel(
+      'gps_scanning',
+      'GPS Scanning',
+      description: 'Persistent notification while GPS is actively scanning for achievements',
+      importance: Importance.low,
+      showBadge: false,
+    );
+    await android.createNotificationChannel(channel);
+  }
+
   static Future<void> initialize() async {
+    await _ensureNotificationChannel();
     await _service.configure(
       iosConfiguration: IosConfiguration(
         autoStart: false,

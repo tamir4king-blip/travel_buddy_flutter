@@ -1,8 +1,10 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:travel_buddy_mobile/core/config/supabase_config.dart';
 import 'package:travel_buddy_mobile/shared/models/achievement.dart';
 import 'package:travel_buddy_mobile/shared/providers/user_profile_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/persistence_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/supabase_provider.dart';
 import 'package:travel_buddy_mobile/shared/data/travel_achievement_registry.dart';
 import 'package:travel_buddy_mobile/shared/data/collection_registry.dart';
 
@@ -84,6 +86,8 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
 
   AchievementsNotifier(this.ref) : super(const AchievementsState()) {
     _loadAchievements();
+    // Sync from Supabase in background after local load
+    _syncFromRemote();
   }
 
   void _loadAchievements() {
@@ -133,27 +137,158 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     }
   }
 
-  void _persist() {
+  /// Fetches unlocked achievements from Supabase and merges with local state.
+  /// Remote achievements that aren't in local state are added (e.g. from another device).
+  /// Local achievements that aren't in remote are synced up.
+  Future<void> _syncFromRemote() async {
+    if (!SupabaseConfig.isConfigured) return;
+    try {
+      final client = ref.read(supabaseClientProvider);
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) return;
+
+      final rows = await client
+          .from('user_achievements')
+          .select()
+          .eq('user_id', userId);
+
+      if (rows.isEmpty) {
+        // No remote data — push local unlocked achievements to Supabase
+        _syncAllToRemote();
+        return;
+      }
+
+      // Build a map of remote unlocked achievements by achievement_id
+      final remoteMap = <String, Map<String, dynamic>>{};
+      for (final row in rows) {
+        final id = row['achievement_id'] as String?;
+        if (id != null) remoteMap[id] = row;
+      }
+
+      // Merge: if remote has an achievement unlocked that local doesn't, unlock it locally
+      var changed = false;
+      final updatedAll = [...state.allAchievements];
+      final updatedUnlocked = [...state.unlockedAchievements];
+
+      for (var i = 0; i < updatedAll.length; i++) {
+        final a = updatedAll[i];
+        final remote = remoteMap[a.id];
+        if (remote != null && !a.isUnlocked) {
+          // Remote says unlocked but local doesn't — restore it
+          updatedAll[i] = a.copyWith(
+            isUnlocked: true,
+            unlockedAt: DateTime.tryParse(remote['unlocked_at'] as String? ?? ''),
+            visitDate: remote['visit_date'] != null
+                ? DateTime.tryParse(remote['visit_date'] as String)
+                : null,
+            notes: remote['notes'] as String?,
+            isRetroactive: remote['is_retroactive'] as bool? ?? false,
+            photos: (remote['photos'] as List<dynamic>?)?.cast<String>() ?? const [],
+          );
+          updatedUnlocked.add(updatedAll[i]);
+          changed = true;
+        }
+      }
+
+      if (changed) {
+        // Recompute completed collections by checking all distinct collection IDs
+        final completedCollections = <String>{...state.completedCollections};
+        final allCollectionIds = updatedAll
+            .map((a) => a.collectionId)
+            .whereType<String>()
+            .toSet();
+        for (final collectionId in allCollectionIds) {
+          if (!completedCollections.contains(collectionId)) {
+            final all = updatedAll.where((a) => a.collectionId == collectionId);
+            if (all.isNotEmpty && all.every((a) => a.isUnlocked)) {
+              completedCollections.add(collectionId);
+            }
+          }
+        }
+
+        state = state.copyWith(
+          allAchievements: updatedAll,
+          unlockedAchievements: updatedUnlocked,
+          completedCollections: completedCollections,
+        );
+        await _persistLocally();
+      }
+
+      // Push any locally-unlocked achievements that aren't in remote
+      _syncMissingToRemote(remoteMap);
+    } catch (_) {
+      // Silently fail — local data is primary
+    }
+  }
+
+  /// Push all locally unlocked achievements to Supabase.
+  Future<void> _syncAllToRemote() async {
+    for (final a in state.unlockedAchievements) {
+      await _upsertAchievementToRemote(a);
+    }
+  }
+
+  /// Push locally-unlocked achievements missing from remote.
+  Future<void> _syncMissingToRemote(Map<String, Map<String, dynamic>> remoteMap) async {
+    for (final a in state.unlockedAchievements) {
+      if (!remoteMap.containsKey(a.id)) {
+        await _upsertAchievementToRemote(a);
+      }
+    }
+  }
+
+  /// Upsert a single achievement to the user_achievements table.
+  Future<void> _upsertAchievementToRemote(Achievement a) async {
+    if (!SupabaseConfig.isConfigured) return;
+    try {
+      final client = ref.read(supabaseClientProvider);
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) return;
+
+      await client.from('user_achievements').upsert({
+        'user_id': userId,
+        'achievement_id': a.id,
+        'unlocked_at': a.unlockedAt?.toIso8601String(),
+        'visit_date': a.visitDate?.toIso8601String(),
+        'notes': a.notes,
+        'is_retroactive': a.isRetroactive,
+        'photos': a.photos,
+      }, onConflict: 'user_id,achievement_id');
+    } catch (_) {
+      // Silently fail — will retry on next sync
+    }
+  }
+
+  /// Save to local persistence only (no remote sync).
+  Future<void> _persistLocally() async {
     final persistence = ref.read(persistenceServiceProvider);
     final unlockedJsons = state.unlockedAchievements
         .map((a) => a.toJson())
         .toList();
-    persistence.saveUnlockedAchievements(unlockedJsons);
-    persistence.saveCompletedCollections(state.completedCollections);
+    await persistence.saveUnlockedAchievements(unlockedJsons);
+    await persistence.saveCompletedCollections(state.completedCollections);
 
-    // Persist pending claims
     final pendingClaims = <String, String>{};
     for (final a in state.allAchievements) {
       if (a.isPendingClaim && !a.isUnlocked && a.pendingClaimAt != null) {
         pendingClaims[a.id] = a.pendingClaimAt!.toIso8601String();
       }
     }
-    persistence.savePendingClaims(pendingClaims);
+    await persistence.savePendingClaims(pendingClaims);
+  }
+
+  /// Persists locally and optionally syncs a specific achievement to Supabase.
+  Future<void> _persist({Achievement? syncToRemote}) async {
+    await _persistLocally();
+
+    if (syncToRemote != null && syncToRemote.isUnlocked) {
+      _upsertAchievementToRemote(syncToRemote);
+    }
   }
 
   /// Mark an achievement as pending claim (detected nearby via background tracking).
   /// Returns true if newly marked as pending.
-  bool markPendingClaim(String achievementId) {
+  Future<bool> markPendingClaim(String achievementId) async {
     final index =
         state.allAchievements.indexWhere((a) => a.id == achievementId);
     if (index == -1) return false;
@@ -170,12 +305,12 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     updatedAll[index] = pending;
 
     state = state.copyWith(allAchievements: updatedAll);
-    _persist();
+    await _persist();
     return true;
   }
 
   /// Confirm a pending claim — fully unlock the achievement.
-  bool confirmPendingClaim(String achievementId) {
+  Future<bool> confirmPendingClaim(String achievementId) async {
     final index =
         state.allAchievements.indexWhere((a) => a.id == achievementId);
     if (index == -1) return false;
@@ -226,8 +361,37 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       }
     }
 
-    _persist();
+    await _persist(syncToRemote: unlocked);
     return true;
+  }
+
+  /// Reload pending claims from SharedPreferences (e.g. after the background
+  /// service has written new entries while the app was suspended).
+  Future<void> refreshFromStorage() async {
+    final persistence = ref.read(persistenceServiceProvider);
+    await persistence.reload();
+
+    final pendingClaims = persistence.loadPendingClaims();
+    if (pendingClaims.isEmpty) return;
+
+    var changed = false;
+    final updatedAll = [...state.allAchievements];
+
+    for (var i = 0; i < updatedAll.length; i++) {
+      final a = updatedAll[i];
+      final pendingAt = pendingClaims[a.id];
+      if (pendingAt != null && !a.isUnlocked && !a.isPendingClaim) {
+        updatedAll[i] = a.copyWith(
+          isPendingClaim: true,
+          pendingClaimAt: DateTime.parse(pendingAt),
+        );
+        changed = true;
+      }
+    }
+
+    if (changed) {
+      state = state.copyWith(allAchievements: updatedAll);
+    }
   }
 
   /// Get all achievements with pending claims.
@@ -254,7 +418,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     state = state.copyWith(searchQuery: query);
   }
 
-  bool claimAchievement(String achievementId, {RetroactiveClaimData? retroactiveData, double? userLat, double? userLng}) {
+  Future<bool> claimAchievement(String achievementId, {RetroactiveClaimData? retroactiveData, double? userLat, double? userLng}) async {
     final index =
         state.allAchievements.indexWhere((a) => a.id == achievementId);
     if (index == -1) return false;
@@ -327,7 +491,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       }
     }
 
-    _persist();
+    await _persist(syncToRemote: unlocked);
     return true;
   }
 
@@ -342,7 +506,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
 
   // ── Dev Panel Methods ──────────────────────────────────────────────────────
 
-  void forceUnlock(String id) {
+  Future<void> forceUnlock(String id) async {
     final index = state.allAchievements.indexWhere((a) => a.id == id);
     if (index == -1) return;
     final achievement = state.allAchievements[index];
@@ -360,10 +524,10 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       unlockedAchievements: [...state.unlockedAchievements, unlocked],
     );
     ref.read(userProfileProvider.notifier).addXp(achievement.xpReward);
-    _persist();
+    await _persist(syncToRemote: unlocked);
   }
 
-  void forceLock(String id) {
+  Future<void> forceLock(String id) async {
     final index = state.allAchievements.indexWhere((a) => a.id == id);
     if (index == -1) return;
     final achievement = state.allAchievements[index];
@@ -381,10 +545,10 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       unlockedAchievements:
           state.unlockedAchievements.where((a) => a.id != id).toList(),
     );
-    _persist();
+    await _persist();
   }
 
-  void unlockAll() {
+  Future<void> unlockAll() async {
     final now = DateTime.now();
     final updatedAll = state.allAchievements.map((a) {
       if (a.isUnlocked) return a;
@@ -395,10 +559,10 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       allAchievements: updatedAll,
       unlockedAchievements: updatedAll.where((a) => a.isUnlocked).toList(),
     );
-    _persist();
+    await _persist();
   }
 
-  void lockAll() {
+  Future<void> lockAll() async {
     final updatedAll = state.allAchievements.map((a) {
       if (!a.isUnlocked) return a;
       return a.copyWith(isUnlocked: false, unlockedAt: null);
@@ -409,10 +573,10 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       unlockedAchievements: [],
       completedCollections: {},
     );
-    _persist();
+    await _persist();
   }
 
-  void updateAchievementRadius(String id, double newRadius) {
+  Future<void> updateAchievementRadius(String id, double newRadius) async {
     final index = state.allAchievements.indexWhere((a) => a.id == id);
     if (index == -1) return;
 
@@ -431,7 +595,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       allAchievements: updatedAll,
       unlockedAchievements: updatedUnlocked,
     );
-    _persist();
+    await _persist();
   }
 
   int _collectionBonusXp(String collectionId) {
@@ -902,6 +1066,42 @@ final achievementRegistry = <Achievement>[
     claimRadius: 200,
     collectionId: 'culture',
     tags: ['culture', 'shopping', 'food'],
+  ),
+  Achievement(
+    id: 'uranus-bar',
+    title: 'Uranus Bar',
+    description: 'Grab a drink at the legendary Uranus Pub on Independence Square, a Netanya icon since the 1980s',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.3303,
+    longitude: 34.8514,
+    claimRadius: 100,
+    collectionId: 'culture',
+    tags: ['culture', 'nightlife', 'bar'],
+  ),
+  Achievement(
+    id: 'hansel-and-gretel',
+    title: 'Hansel & Gretel',
+    description: 'Enjoy craft beers at the Hansel & Gretel beer garden in south Netanya',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.2787,
+    longitude: 34.8639,
+    claimRadius: 100,
+    collectionId: 'culture',
+    tags: ['culture', 'nightlife', 'bar'],
+  ),
+  Achievement(
+    id: 'beer-shop',
+    title: 'Beer Shop',
+    description: 'Browse over 900 beers at the legendary Beer Shop on Ha-Bonim Street',
+    tier: AchievementTier.silver,
+    xpReward: 20,
+    latitude: 32.2808,
+    longitude: 34.8618,
+    claimRadius: 100,
+    collectionId: 'culture',
+    tags: ['culture', 'nightlife', 'bar'],
   ),
   // ── Travel Achievements ──
   ...travelAchievementRegistry,

@@ -1,299 +1,384 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:lucide_icons/lucide_icons.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
-import 'package:travel_buddy_mobile/features/map/providers/map_filter_provider.dart';
 import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
+import 'package:travel_buddy_mobile/features/map/providers/map_filter_provider.dart';
 import 'package:travel_buddy_mobile/shared/data/collection_registry.dart';
 import 'package:travel_buddy_mobile/shared/data/quest_registry.dart';
 import 'package:travel_buddy_mobile/shared/data/skill_registry.dart';
 
-class MapFilterBar extends ConsumerWidget {
+/// Right-side vertical filter panel with circle toggles.
+/// Subfilters expand horizontally (right-to-left) as scrollable pill rows.
+/// All categories can be expanded simultaneously.
+class MapFilterBar extends ConsumerStatefulWidget {
   const MapFilterBar({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<MapFilterBar> createState() => _MapFilterBarState();
+}
+
+class _MapFilterBarState extends ConsumerState<MapFilterBar>
+    with TickerProviderStateMixin {
+  final Set<_FilterCategory> _expandedCategories = {};
+
+  // One animation controller per category
+  late final Map<_FilterCategory, AnimationController> _animControllers;
+
+  @override
+  void initState() {
+    super.initState();
+    _animControllers = {
+      for (final cat in _FilterCategory.values)
+        cat: AnimationController(
+          vsync: this,
+          duration: const Duration(milliseconds: 250),
+        ),
+    };
+  }
+
+  @override
+  void dispose() {
+    for (final c in _animControllers.values) {
+      c.dispose();
+    }
+    super.dispose();
+  }
+
+  void _toggleFilter(_FilterCategory category) {
+    final notifier = ref.read(mapFilterProvider.notifier);
+    switch (category) {
+      case _FilterCategory.achievements:
+        notifier.toggleAchievements();
+      case _FilterCategory.quests:
+        notifier.toggleQuests();
+      case _FilterCategory.skills:
+        notifier.toggleSkills();
+    }
+    // Collapse subfilters if we just disabled this category
+    final filter = ref.read(mapFilterProvider);
+    final stillActive = switch (category) {
+      _FilterCategory.achievements => filter.showAchievements,
+      _FilterCategory.quests => filter.showQuests,
+      _FilterCategory.skills => filter.showSkills,
+    };
+    if (!stillActive && _expandedCategories.contains(category)) {
+      _collapseCategory(category);
+    }
+    HapticFeedback.selectionClick();
+  }
+
+  void _toggleExpand(_FilterCategory category) {
+    if (_expandedCategories.contains(category)) {
+      _collapseCategory(category);
+    } else {
+      setState(() => _expandedCategories.add(category));
+      _animControllers[category]!.forward(from: 0);
+    }
+    HapticFeedback.selectionClick();
+  }
+
+  void _collapseCategory(_FilterCategory category) {
+    _animControllers[category]!.reverse().then((_) {
+      if (mounted) setState(() => _expandedCategories.remove(category));
+    });
+  }
+
+  void _onSubfilterTap(_FilterCategory category, String id) {
+    final notifier = ref.read(mapFilterProvider.notifier);
+    switch (category) {
+      case _FilterCategory.achievements:
+        notifier.toggleAchievementCollection(id);
+      case _FilterCategory.quests:
+        notifier.toggleQuestCategory(id);
+      case _FilterCategory.skills:
+        notifier.toggleSkillId(id);
+    }
+    HapticFeedback.selectionClick();
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final filter = ref.watch(mapFilterProvider);
     final l10n = AppLocalizations.of(context)!;
 
     return Column(
       mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.end,
       children: [
-        // Main filter chips
-        SingleChildScrollView(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          child: Row(
-            children: [
-              _MapFilterChip(
-                icon: LucideIcons.trophy,
-                label: l10n.mapFilterAchievements,
-                selected: filter.showAchievements,
-                color: AppColors.gold,
-                onTap: () => ref.read(mapFilterProvider.notifier).toggleAchievements(),
-              ),
-              const SizedBox(width: 8),
-              _MapFilterChip(
-                icon: LucideIcons.swords,
-                label: l10n.mapFilterQuests,
-                selected: filter.showQuests,
-                color: AppColors.success,
-                onTap: () => ref.read(mapFilterProvider.notifier).toggleQuests(),
-              ),
-              const SizedBox(width: 8),
-              _MapFilterChip(
-                icon: LucideIcons.sparkles,
-                label: l10n.mapFilterSkills,
-                selected: filter.showSkills,
-                color: AppColors.info,
-                onTap: () => ref.read(mapFilterProvider.notifier).toggleSkills(),
-              ),
-            ],
-          ),
+        // Achievements row
+        _FilterRow(
+          category: _FilterCategory.achievements,
+          label: l10n.navAchievements,
+          icon: LucideIcons.trophy,
+          color: AppColors.gold,
+          active: filter.showAchievements,
+          expanded: _expandedCategories.contains(_FilterCategory.achievements),
+          animController: _animControllers[_FilterCategory.achievements]!,
+          onToggle: () => _toggleFilter(_FilterCategory.achievements),
+          onArrowTap: filter.showAchievements
+              ? () => _toggleExpand(_FilterCategory.achievements)
+              : null,
+          subfilterItems: collectionRegistry
+              .map((c) => _SubfilterItem(
+                    id: c.id,
+                    label: '${c.icon} ${c.name}',
+                    selected:
+                        filter.selectedAchievementCollections.contains(c.id),
+                  ))
+              .toList(),
+          onSubfilterTap: (id) =>
+              _onSubfilterTap(_FilterCategory.achievements, id),
         ),
-        // Subfilter slider - animated
-        AnimatedSize(
-          duration: const Duration(milliseconds: 250),
-          curve: Curves.easeOutCubic,
-          alignment: Alignment.topCenter,
-          child: _buildSubfilterRow(context, ref, filter),
+        const SizedBox(height: 10),
+
+        // Quests row
+        _FilterRow(
+          category: _FilterCategory.quests,
+          label: l10n.navQuests,
+          icon: LucideIcons.swords,
+          color: AppColors.success,
+          active: filter.showQuests,
+          expanded: _expandedCategories.contains(_FilterCategory.quests),
+          animController: _animControllers[_FilterCategory.quests]!,
+          onToggle: () => _toggleFilter(_FilterCategory.quests),
+          onArrowTap: filter.showQuests
+              ? () => _toggleExpand(_FilterCategory.quests)
+              : null,
+          subfilterItems: getAllCategories()
+              .map((cat) => _SubfilterItem(
+                    id: cat,
+                    label:
+                        '${_questCategoryIcons[cat] ?? "📍"} ${cat.replaceAll("-", " ").capitalize()}',
+                    selected: filter.selectedQuestCategories.contains(cat),
+                  ))
+              .toList(),
+          onSubfilterTap: (id) =>
+              _onSubfilterTap(_FilterCategory.quests, id),
+        ),
+        const SizedBox(height: 10),
+
+        // Skills row
+        _FilterRow(
+          category: _FilterCategory.skills,
+          label: l10n.navSkills,
+          icon: LucideIcons.sparkles,
+          color: AppColors.info,
+          active: filter.showSkills,
+          expanded: _expandedCategories.contains(_FilterCategory.skills),
+          animController: _animControllers[_FilterCategory.skills]!,
+          onToggle: () => _toggleFilter(_FilterCategory.skills),
+          onArrowTap: filter.showSkills
+              ? () => _toggleExpand(_FilterCategory.skills)
+              : null,
+          subfilterItems: skillRegistry
+              .map((s) => _SubfilterItem(
+                    id: s.id,
+                    label: '${s.icon} ${s.name}',
+                    selected: filter.selectedSkillIds.contains(s.id),
+                  ))
+              .toList(),
+          onSubfilterTap: (id) =>
+              _onSubfilterTap(_FilterCategory.skills, id),
         ),
       ],
     );
   }
-
-  Widget _buildSubfilterRow(BuildContext context, WidgetRef ref, MapFilterState filter) {
-    if (filter.showAchievements && !filter.showQuests && !filter.showSkills) {
-      return _AchievementSubfilters(
-        selectedCollection: filter.selectedAchievementCollection,
-        onSelect: (id) => ref.read(mapFilterProvider.notifier).selectAchievementCollection(id),
-      );
-    }
-    if (filter.showQuests && !filter.showAchievements && !filter.showSkills) {
-      return _QuestSubfilters(
-        selectedCategory: filter.selectedQuestCategory,
-        onSelect: (cat) => ref.read(mapFilterProvider.notifier).selectQuestCategory(cat),
-      );
-    }
-    if (filter.showSkills && !filter.showAchievements && !filter.showQuests) {
-      return _SkillSubfilters(
-        selectedSkillId: filter.selectedSkillId,
-        onSelect: (id) => ref.read(mapFilterProvider.notifier).selectSkillId(id),
-      );
-    }
-    // Multiple or no filters active - no subfilter row
-    return const SizedBox.shrink();
-  }
 }
 
-// ── Achievement Subfilters (by collection) ──
+// ── Types ──
 
-class _AchievementSubfilters extends StatelessWidget {
-  final String? selectedCollection;
-  final ValueChanged<String> onSelect;
+enum _FilterCategory { achievements, quests, skills }
 
-  const _AchievementSubfilters({
-    required this.selectedCollection,
-    required this.onSelect,
-  });
+const _questCategoryIcons = <String, String>{
+  'adventure': '🏔️',
+  'camping': '⛺',
+  'cooking': '👨‍🍳',
+  'cultural': '🏛️',
+  'extreme': '🪂',
+  'fishing': '🎣',
+  'food-drink': '🍜',
+  'hiking': '🥾',
+  'nightlife': '🎉',
+  'photography': '📸',
+  'shopping': '🛍️',
+  'skiing': '⛷️',
+  'social': '🤝',
+  'transportation': '🚂',
+  'urban': '🏙️',
+  'water-sports': '🏄',
+  'wellness': '🧘',
+  'wildlife': '🦋',
+};
 
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: SizedBox(
-        height: 34,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: collectionRegistry.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 6),
-          itemBuilder: (context, index) {
-            final collection = collectionRegistry[index];
-            final isSelected = selectedCollection == collection.id;
-            return _SubfilterChip(
-              label: '${collection.icon} ${collection.name}',
-              selected: isSelected,
-              color: AppColors.gold,
-              onTap: () => onSelect(collection.id),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
+// ── Filter row: bubble on right, horizontal pill slider expanding left ──
 
-// ── Quest Subfilters (by category) ──
-
-class _QuestSubfilters extends StatelessWidget {
-  final String? selectedCategory;
-  final ValueChanged<String> onSelect;
-
-  const _QuestSubfilters({
-    required this.selectedCategory,
-    required this.onSelect,
-  });
-
-  static const _categoryIcons = <String, String>{
-    'adventure': '🏔️',
-    'camping': '⛺',
-    'cooking': '👨‍🍳',
-    'cultural': '🏛️',
-    'extreme': '🪂',
-    'fishing': '🎣',
-    'food-drink': '🍜',
-    'hiking': '🥾',
-    'nightlife': '🎉',
-    'photography': '📸',
-    'shopping': '🛍️',
-    'skiing': '⛷️',
-    'social': '🤝',
-    'transportation': '🚂',
-    'urban': '🏙️',
-    'water-sports': '🏄',
-    'wellness': '🧘',
-    'wildlife': '🦋',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    final categories = getAllCategories();
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: SizedBox(
-        height: 34,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: categories.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 6),
-          itemBuilder: (context, index) {
-            final cat = categories[index];
-            final isSelected = selectedCategory == cat;
-            final icon = _categoryIcons[cat] ?? '📍';
-            final displayName = cat.replaceAll('-', ' ');
-            final capitalized = displayName[0].toUpperCase() + displayName.substring(1);
-            return _SubfilterChip(
-              label: '$icon $capitalized',
-              selected: isSelected,
-              color: AppColors.success,
-              onTap: () => onSelect(cat),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-// ── Skill Subfilters (by individual skill) ──
-
-class _SkillSubfilters extends StatelessWidget {
-  final String? selectedSkillId;
-  final ValueChanged<String> onSelect;
-
-  const _SkillSubfilters({
-    required this.selectedSkillId,
-    required this.onSelect,
-  });
-
-  @override
-  Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(top: 8),
-      child: SizedBox(
-        height: 34,
-        child: ListView.separated(
-          scrollDirection: Axis.horizontal,
-          padding: const EdgeInsets.symmetric(horizontal: 16),
-          itemCount: skillRegistry.length,
-          separatorBuilder: (_, __) => const SizedBox(width: 6),
-          itemBuilder: (context, index) {
-            final skill = skillRegistry[index];
-            final isSelected = selectedSkillId == skill.id;
-            return _SubfilterChip(
-              label: '${skill.icon} ${skill.name}',
-              selected: isSelected,
-              color: AppColors.info,
-              onTap: () => onSelect(skill.id),
-            );
-          },
-        ),
-      ),
-    );
-  }
-}
-
-// ── Shared Widgets ──
-
-class _MapFilterChip extends StatelessWidget {
-  final IconData icon;
+class _FilterRow extends StatelessWidget {
+  final _FilterCategory category;
   final String label;
-  final bool selected;
+  final IconData icon;
   final Color color;
-  final VoidCallback onTap;
+  final bool active;
+  final bool expanded;
+  final AnimationController animController;
+  final VoidCallback onToggle;
+  final VoidCallback? onArrowTap;
+  final List<_SubfilterItem> subfilterItems;
+  final ValueChanged<String> onSubfilterTap;
 
-  const _MapFilterChip({
-    required this.icon,
+  const _FilterRow({
+    required this.category,
     required this.label,
-    required this.selected,
+    required this.icon,
     required this.color,
-    required this.onTap,
+    required this.active,
+    required this.expanded,
+    required this.animController,
+    required this.onToggle,
+    this.onArrowTap,
+    required this.subfilterItems,
+    required this.onSubfilterTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
-        padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
-        decoration: BoxDecoration(
-          color: selected
-              ? color.withValues(alpha: 0.18)
-              : AppColors.bgCardLight.withValues(alpha: 0.45),
-          borderRadius: BorderRadius.circular(10),
-          border: Border.all(
-            color: selected
-                ? color.withValues(alpha: 0.8)
-                : AppColors.bgCardLight.withValues(alpha: 0.6),
+    final curvedAnim = CurvedAnimation(
+      parent: animController,
+      curve: Curves.easeOutCubic,
+    );
+
+    return Row(
+      mainAxisSize: MainAxisSize.min,
+      crossAxisAlignment: CrossAxisAlignment.center,
+      children: [
+        // Horizontal subfilter pills — expand left from the bubble
+        if (expanded)
+          AnimatedBuilder(
+            animation: curvedAnim,
+            builder: (context, child) {
+              return ClipRect(
+                child: Align(
+                  alignment: Alignment.centerRight,
+                  widthFactor: curvedAnim.value,
+                  child: Opacity(
+                    opacity: curvedAnim.value,
+                    child: child,
+                  ),
+                ),
+              );
+            },
+            child: Container(
+              constraints: BoxConstraints(
+                maxWidth: MediaQuery.of(context).size.width - 100,
+              ),
+              margin: const EdgeInsets.only(right: 8),
+              height: 34,
+              child: SingleChildScrollView(
+                scrollDirection: Axis.horizontal,
+                reverse: true, // scrolls from right to left
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (int i = 0; i < subfilterItems.length; i++) ...[
+                      if (i > 0) const SizedBox(width: 6),
+                      _SubfilterChip(
+                        item: subfilterItems[i],
+                        color: color,
+                        onTap: () => onSubfilterTap(subfilterItems[i].id),
+                      ),
+                    ],
+                  ],
+                ),
+              ),
+            ),
           ),
-        ),
-        child: Row(
+
+        // Arrow — points left when collapsed, right when expanded
+        if (onArrowTap != null)
+          GestureDetector(
+            onTap: onArrowTap,
+            behavior: HitTestBehavior.opaque,
+            child: Padding(
+              padding: const EdgeInsets.only(right: 4),
+              child: AnimatedRotation(
+                turns: expanded ? 0.5 : 0.0,
+                duration: const Duration(milliseconds: 250),
+                curve: Curves.easeOutCubic,
+                child: Icon(
+                  LucideIcons.chevronLeft,
+                  size: 18,
+                  color: color,
+                ),
+              ),
+            ),
+          ),
+
+        // Bubble with label
+        Column(
           mainAxisSize: MainAxisSize.min,
           children: [
-            Icon(
-              icon,
-              size: 13,
-              color: selected ? color : AppColors.textSecondary,
-            ),
-            const SizedBox(width: 5),
             Text(
               label,
               style: TextStyle(
-                color: selected ? color : AppColors.textSecondary,
-                fontSize: 11,
+                fontSize: 9,
                 fontWeight: FontWeight.w600,
+                color: active ? color : AppColors.textMuted,
+              ),
+            ),
+            const SizedBox(height: 3),
+            GestureDetector(
+              onTap: onToggle,
+              child: Container(
+                width: 44,
+                height: 44,
+                decoration: BoxDecoration(
+                  shape: BoxShape.circle,
+                  color: active ? color : AppColors.bgCard,
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: 0.2),
+                      blurRadius: 8,
+                      offset: const Offset(0, 2),
+                    ),
+                  ],
+                ),
+                child: Icon(
+                  icon,
+                  size: 20,
+                  color: active ? Colors.white : AppColors.textMuted,
+                ),
               ),
             ),
           ],
         ),
-      ),
+      ],
     );
   }
 }
 
-class _SubfilterChip extends StatelessWidget {
+// ── Subfilter data ──
+
+class _SubfilterItem {
+  final String id;
   final String label;
   final bool selected;
+  const _SubfilterItem({
+    required this.id,
+    required this.label,
+    required this.selected,
+  });
+}
+
+// ── Compact subfilter chip for horizontal row ──
+
+class _SubfilterChip extends StatelessWidget {
+  final _SubfilterItem item;
   final Color color;
   final VoidCallback onTap;
 
   const _SubfilterChip({
-    required this.label,
-    required this.selected,
+    required this.item,
     required this.color,
     required this.onTap,
   });
@@ -302,31 +387,35 @@ class _SubfilterChip extends StatelessWidget {
   Widget build(BuildContext context) {
     return GestureDetector(
       onTap: onTap,
-      child: AnimatedContainer(
-        duration: const Duration(milliseconds: 200),
-        curve: Curves.easeOutCubic,
+      child: Container(
         padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 6),
         decoration: BoxDecoration(
-          color: selected
-              ? color.withValues(alpha: 0.22)
-              : AppColors.bgCard.withValues(alpha: 0.85),
-          borderRadius: BorderRadius.circular(8),
-          border: Border.all(
-            color: selected
-                ? color.withValues(alpha: 0.7)
-                : AppColors.textMuted.withValues(alpha: 0.2),
-          ),
+          color: item.selected ? color : AppColors.bgCard,
+          borderRadius: BorderRadius.circular(17),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.15),
+              blurRadius: 4,
+              offset: const Offset(0, 1),
+            ),
+          ],
         ),
         child: Text(
-          label,
+          item.label,
           style: TextStyle(
-            color: selected ? color : AppColors.textSecondary,
+            color: item.selected ? Colors.white : AppColors.textPrimary,
             fontSize: 11,
-            fontWeight: selected ? FontWeight.w700 : FontWeight.w500,
-            decoration: TextDecoration.none,
+            fontWeight: item.selected ? FontWeight.w700 : FontWeight.w500,
           ),
+          maxLines: 1,
+          overflow: TextOverflow.ellipsis,
         ),
       ),
     );
   }
+}
+
+extension _StringCap on String {
+  String capitalize() =>
+      isEmpty ? this : '${this[0].toUpperCase()}${substring(1)}';
 }

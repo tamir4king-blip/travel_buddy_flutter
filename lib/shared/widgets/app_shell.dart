@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:flutter/physics.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
@@ -9,8 +8,8 @@ import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/features/activity_log/presentation/screens/activity_log_screen.dart';
 import 'package:travel_buddy_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:travel_buddy_mobile/features/leaderboard/presentation/screens/leaderboard_screen.dart';
-import 'package:travel_buddy_mobile/features/map/presentation/screens/map_screen.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/profile_screen.dart';
+import 'package:travel_buddy_mobile/features/map/providers/map_camera_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/nearby_achievements_provider.dart';
 import 'package:travel_buddy_mobile/shared/widgets/proximity_alert.dart';
@@ -27,21 +26,18 @@ class AppShell extends ConsumerStatefulWidget {
 class _AppShellState extends ConsumerState<AppShell>
     with TickerProviderStateMixin {
   String? _alertAchievementId;
-  double _overlayTop = 0;
-  bool _isDraggingOverlay = false;
-  bool _isExploreMode = false;
-  bool _initialized = false;
-
-  // Vertical spring animation controller
-  late AnimationController _springController;
 
   // Horizontal slide animation controller (0 = current page, ±1 = fully slid)
   late AnimationController _slideController;
   int? _slideTargetIndex; // The page index we're sliding towards
   bool _isSlideAnimating = false; // True when auto-animating after drag end
 
-  // Overscroll velocity tracking
-  double _overscrollVelocity = 0;
+  // Nav bar hide/show animation for immersive map (0 = visible, 1 = hidden)
+  late AnimationController _navBarHideController;
+  bool _wasOnMap = false;
+
+  // Double-tap detection for explore button
+  DateTime? _lastExploreTapTime;
 
   // Horizontal swipe state
   int _previousIndex = 0;
@@ -58,65 +54,78 @@ class _AppShellState extends ConsumerState<AppShell>
     ProfileScreen(),
   ];
 
-  // Spring physics for smooth vertical snapping
-  static const _snapSpring = SpringDescription(
-    mass: 1.0,
-    stiffness: 300.0,
-    damping: 28.0,
-  );
+  /// Whether the current route is one of the main tab pages.
+  bool _isMainTabRoute(BuildContext context) {
+    final location = GoRouterState.of(context).uri.path;
+    return _routes.contains(location);
+  }
+
+  /// Whether the current route is the map page.
+  bool _isMapRoute(BuildContext context) {
+    return GoRouterState.of(context).uri.path == '/map';
+  }
+
+  /// Returns IndexedStack for main tabs, map screen for /map, or GoRouter child for sub-routes.
+  /// Wraps content in MediaQuery.removePadding to prevent SafeArea from
+  /// double-counting the bottom inset (already handled by the content area's
+  /// bottom: navBarHeight + bottomInset positioning).
+  Widget _pageContent(int selectedIndex) {
+    final child = _isMainTabRoute(context)
+        ? IndexedStack(
+            index: selectedIndex,
+            children: _pageWidgets,
+          )
+        : widget.child;
+    return MediaQuery.removePadding(
+      context: context,
+      removeBottom: true,
+      child: child,
+    );
+  }
 
   @override
   void initState() {
     super.initState();
-    _springController = AnimationController.unbounded(vsync: this);
-    _springController.addListener(_onSpringTick);
-
     _slideController = AnimationController(
       vsync: this,
       duration: const Duration(milliseconds: 280),
     );
     _slideController.addListener(() => setState(() {}));
     _slideController.addStatusListener(_onSlideAnimationStatus);
+
+    _navBarHideController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 350),
+    );
+    _navBarHideController.addListener(() => setState(() {}));
   }
 
   @override
   void dispose() {
-    _springController.removeListener(_onSpringTick);
-    _springController.dispose();
     _slideController.removeStatusListener(_onSlideAnimationStatus);
     _slideController.dispose();
+    _navBarHideController.dispose();
     super.dispose();
-  }
-
-  void _onSpringTick() {
-    if (!_isDraggingOverlay) {
-      setState(() => _overlayTop = _springController.value);
-    }
   }
 
   void _onSlideAnimationStatus(AnimationStatus status) {
     if (status == AnimationStatus.completed && _isSlideAnimating) {
       _isSlideAnimating = false;
-      // Navigate to the target page now that slide animation is complete
       if (_slideTargetIndex != null && mounted) {
         final targetIndex = _slideTargetIndex!;
         _slideTargetIndex = null;
         _slideController.value = 0;
         context.go(_routes[targetIndex]);
       } else {
-        // Bounced back — just reset
         _slideTargetIndex = null;
       }
     }
   }
 
   /// Current slide offset as -1..+1.
-  /// Positive = sliding right (revealing page to the left, i.e. previous page).
-  /// Negative = sliding left (revealing page to the right, i.e. next page).
   double get _slideOffset {
     if (_slideTargetIndex == null) return 0;
     final currentIndex = _previousIndex;
-    // Sliding to a higher index = next page = slide left = negative
     if (_slideTargetIndex! > currentIndex) {
       return -_slideController.value;
     } else {
@@ -133,96 +142,7 @@ class _AppShellState extends ConsumerState<AppShell>
     return 0;
   }
 
-  // Bottom snap: page peeks with just the drag handle visible
-  double _collapsedTopFor(BuildContext context, double navBarHeight) {
-    final h = MediaQuery.of(context).size.height;
-    final bottomSafe = MediaQuery.of(context).padding.bottom;
-    const peekHeight = 84.0;
-    final collapsed = h - navBarHeight - peekHeight - bottomSafe;
-    return collapsed.clamp(0.0, h);
-  }
-
-  // Middle snap: page at ~45% of screen
-  double _midTopFor(BuildContext context, double navBarHeight) {
-    final h = MediaQuery.of(context).size.height;
-    return (h * 0.45).clamp(0.0, _collapsedTopFor(context, navBarHeight));
-  }
-
-  void _syncOverlayTop(BuildContext context, double navBarHeight,
-      {required int currentIndex}) {
-    final collapsed = _collapsedTopFor(context, navBarHeight);
-    if (!_initialized) {
-      _overlayTop = 0;
-      _previousIndex = currentIndex;
-      _initialized = true;
-      return;
-    }
-    // Reset overlay to fully expanded when switching tabs
-    if (_previousIndex != currentIndex) {
-      _springController.stop();
-      _overlayTop = 0;
-      _isExploreMode = false;
-    }
-    _previousIndex = currentIndex;
-    _overlayTop = _overlayTop.clamp(0.0, collapsed);
-  }
-
-  /// Animates overlay to [target] using spring physics.
-  void _animateTo(double target, {double velocity = 0}) {
-    final simulation = SpringSimulation(
-      _snapSpring,
-      _overlayTop,
-      target,
-      velocity / 1000,
-    );
-    _springController.animateWith(simulation);
-    setState(() => _isExploreMode = target > 0);
-  }
-
-  /// Determines the best vertical snap point.
-  void _handleDragEnd(BuildContext context, double navBarHeight,
-      {double velocity = 0}) {
-    final collapsed = _collapsedTopFor(context, navBarHeight);
-    final mid = _midTopFor(context, navBarHeight);
-    final current = _overlayTop;
-
-    const top = 0.0;
-    final snaps = [top, mid, collapsed];
-
-    double target;
-
-    if (velocity.abs() > 300) {
-      if (velocity > 0) {
-        target = snaps.where((s) => s > current + 1).firstOrNull ?? collapsed;
-      } else {
-        target =
-            snaps.reversed.where((s) => s < current - 1).firstOrNull ?? top;
-      }
-    } else {
-      double minDist = double.infinity;
-      target = top;
-      for (final snap in snaps) {
-        final dist = (current - snap).abs();
-        if (dist < minDist) {
-          minDist = dist;
-          target = snap;
-        }
-      }
-    }
-
-    if (target == top || target == collapsed) {
-      HapticFeedback.mediumImpact();
-    } else {
-      HapticFeedback.selectionClick();
-    }
-
-    _animateTo(target, velocity: velocity);
-    _isDraggingOverlay = false;
-    _overscrollVelocity = 0;
-  }
-
-  /// Handles horizontal drag start — always uses physical screen coordinates,
-  /// ignoring text direction so swipe behavior is identical in LTR and RTL.
+  /// Handles horizontal drag start.
   void _onHorizontalDragStart(DragStartDetails details) {
     if (_isSlideAnimating) return;
     _horizontalDragStart = details.globalPosition.dx;
@@ -235,7 +155,6 @@ class _AppShellState extends ConsumerState<AppShell>
   void _onHorizontalDragUpdate(DragUpdateDetails details, int currentIndex) {
     if (_isSlideAnimating) return;
 
-    // Always use physical dx (left-to-right on screen), ignore RTL layout
     _horizontalDragDelta = details.globalPosition.dx - _horizontalDragStart;
 
     if (!_isHorizontalSwiping && _horizontalDragDelta.abs() > 10) {
@@ -246,7 +165,6 @@ class _AppShellState extends ConsumerState<AppShell>
       final sw = MediaQuery.of(context).size.width;
       final rawOffset = (_horizontalDragDelta / sw).clamp(-1.0, 1.0);
 
-      // Determine target: drag left (negative) = next page, drag right (positive) = prev page
       int? target;
       if (rawOffset < 0 && currentIndex < _routes.length - 1) {
         target = currentIndex + 1;
@@ -258,7 +176,6 @@ class _AppShellState extends ConsumerState<AppShell>
         _slideTargetIndex = target;
         _slideController.value = rawOffset.abs();
       } else {
-        // At boundary — apply rubber-band resistance
         _slideTargetIndex = null;
         _slideController.value = rawOffset.abs() * 0.2;
       }
@@ -269,7 +186,6 @@ class _AppShellState extends ConsumerState<AppShell>
     if (_isSlideAnimating || !_isHorizontalSwiping) {
       _isHorizontalSwiping = false;
       if (!_isSlideAnimating && _slideController.value > 0) {
-        // Snap back
         _slideTargetIndex = null;
         _isSlideAnimating = true;
         _slideController.animateTo(0,
@@ -281,20 +197,16 @@ class _AppShellState extends ConsumerState<AppShell>
 
     _isHorizontalSwiping = false;
 
-    // Use physical velocity (px/s), not logical
     final velocity = details.primaryVelocity ?? 0;
     final progress = _slideController.value;
     final hasTarget = _slideTargetIndex != null;
 
-    // Decide: commit to navigation or bounce back
     bool commit = false;
     if (hasTarget) {
       if (velocity.abs() > 300) {
-        // Fling: commit if fling direction matches slide direction
         final slidingToNext = _slideTargetIndex! > currentIndex;
         commit = slidingToNext ? velocity < 0 : velocity > 0;
       } else {
-        // No fling: commit if past 35% threshold
         commit = progress > 0.35;
       }
     }
@@ -303,7 +215,6 @@ class _AppShellState extends ConsumerState<AppShell>
 
     if (commit && hasTarget) {
       HapticFeedback.selectionClick();
-      // Animate to full slide, then navigate on completion
       final remainingFraction = 1.0 - progress;
       final duration = Duration(
         milliseconds: (remainingFraction * 250).round().clamp(100, 250),
@@ -311,7 +222,6 @@ class _AppShellState extends ConsumerState<AppShell>
       _slideController.animateTo(1.0,
           duration: duration, curve: Curves.easeOutCubic);
     } else {
-      // Bounce back
       _slideTargetIndex = null;
       final duration = Duration(
         milliseconds: (progress * 250).round().clamp(100, 250),
@@ -323,27 +233,46 @@ class _AppShellState extends ConsumerState<AppShell>
 
   void _onDestinationSelected(BuildContext context, int index) {
     if (index >= 0 && index < _routes.length) {
-      _springController.stop();
       _slideController.stop();
       _slideTargetIndex = null;
       _slideController.value = 0;
       _isSlideAnimating = false;
-      setState(() {
-        _isExploreMode = false;
-        _overlayTop = 0;
-      });
       context.go(_routes[index]);
     }
   }
 
-  void _toggleExploreMode(BuildContext context, double navBarHeight) {
-    final collapsed = _collapsedTopFor(context, navBarHeight);
-    if (_isExploreMode) {
-      _animateTo(0);
+  void _onExploreTap(BuildContext context) {
+    final isOnMap = _isMapRoute(context);
+
+    if (!isOnMap) {
+      // Not on map — navigate to it
       HapticFeedback.mediumImpact();
+      _lastExploreTapTime = null;
+      context.go('/map');
+      return;
+    }
+
+    // Already on map — detect single vs double tap
+    final now = DateTime.now();
+    if (_lastExploreTapTime != null &&
+        now.difference(_lastExploreTapTime!).inMilliseconds < 300) {
+      // Double tap — zoom to globe
+      _lastExploreTapTime = null;
+      HapticFeedback.mediumImpact();
+      ref.read(mapCameraCommandProvider.notifier).state =
+          const ZoomToGlobeCommand();
     } else {
-      _animateTo(collapsed);
-      HapticFeedback.mediumImpact();
+      // First tap — wait to see if a second tap follows
+      _lastExploreTapTime = now;
+      Future.delayed(const Duration(milliseconds: 300), () {
+        if (_lastExploreTapTime == now && mounted) {
+          // No second tap arrived — single tap: center on user
+          _lastExploreTapTime = null;
+          HapticFeedback.selectionClick();
+          ref.read(mapCameraCommandProvider.notifier).state =
+              const CenterOnUserCommand();
+        }
+      });
     }
   }
 
@@ -353,10 +282,30 @@ class _AppShellState extends ConsumerState<AppShell>
     final geo = ref.watch(geolocationProvider);
     final nearbyState = ref.watch(nearbyAchievementsProvider);
     final selectedIndex = _currentIndex(context);
+    final isOnMap = _isMapRoute(context);
+    // Animate nav bar hide/show when entering/exiting map
+    // Deferred to post-frame to avoid triggering rebuilds during build
+    if (isOnMap && !_wasOnMap) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _navBarHideController.forward(from: 0);
+        ref.read(mapImmersiveProvider.notifier).state = true;
+      });
+    } else if (!isOnMap && _wasOnMap) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _navBarHideController.reverse(from: 1);
+        ref.read(mapImmersiveProvider.notifier).state = false;
+      });
+    }
+    _wasOnMap = isOnMap;
+
+    // Track previous index for horizontal swipe (only for tab pages)
+    if (!isOnMap) {
+      _previousIndex = selectedIndex;
+    }
 
     // Listen for newly discovered achievements — show in-app alert banner.
-    // Notifications and pending claim marking are handled by the
-    // nearbyAchievementsProvider itself, so we only drive the UI here.
     ref.listen(nearbyAchievementsProvider, (prev, next) {
       if (!geo.isLiveTracking) return;
       if (next.newlyDiscovered.isNotEmpty) {
@@ -387,16 +336,10 @@ class _AppShellState extends ConsumerState<AppShell>
       l10n: l10n,
       selectedIndex: selectedIndex,
       navBarHeight: navBarHeight,
+      isOnMap: isOnMap,
     );
 
-    _syncOverlayTop(context, navBarHeight, currentIndex: selectedIndex);
-
     final screenWidth = MediaQuery.of(context).size.width;
-    final collapsed = _collapsedTopFor(context, navBarHeight);
-
-    // Overlay progress 0..1 for visual effects
-    final overlayProgress =
-        collapsed > 0 ? (_overlayTop / collapsed).clamp(0.0, 1.0) : 0.0;
 
     // Compute slide translation for horizontal page swipe
     final slideOffset = _slideOffset;
@@ -408,240 +351,95 @@ class _AppShellState extends ConsumerState<AppShell>
       adjIndex = _slideTargetIndex;
     }
 
+    // Nav bar animation progress: 0 = visible, 1 = hidden
+    final navHideProgress = Curves.easeOutCubic.transform(_navBarHideController.value);
+    final contentBottom = (navBarHeight + bottomInset) * (1 - navHideProgress);
+    final navBarBottom = -(navBarHeight + bottomInset) * navHideProgress;
+
     final body = Stack(
       children: [
-        // Layer 1: Persistent map background
-        const Positioned.fill(
-          child: MapScreen(),
-        ),
-
-        // Layer 2: Page overlay (slides down to reveal map)
+        // Page content area
         Positioned(
           left: 0,
           right: 0,
-          top: _overlayTop,
-          bottom: navBarHeight + bottomInset,
+          top: 0,
+          bottom: contentBottom,
           child: Material(
-            color: AppColors.bgDark,
-            borderRadius: BorderRadius.vertical(
-                top: Radius.circular(22 * (1.0 - overlayProgress * 0.3))),
-            clipBehavior: Clip.hardEdge,
-            child: Column(
-              children: [
-                // Drag handle
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onPanStart: (details) {
-                    _springController.stop();
-                    _horizontalDragStart = details.globalPosition.dx;
-                    _horizontalDragDelta = 0;
-                    _isHorizontalSwiping = false;
-                    _isDraggingOverlay = true;
-                  },
-                  onPanUpdate: (details) {
-                    final dx =
-                        details.globalPosition.dx - _horizontalDragStart;
-                    _horizontalDragDelta = dx;
-                    if (!_isHorizontalSwiping &&
-                        dx.abs() > 15 &&
-                        dx.abs() > details.delta.dy.abs() * 1.5) {
-                      _isHorizontalSwiping = true;
-                    }
-                    if (_isHorizontalSwiping) {
-                      _onHorizontalDragUpdate(
-                        DragUpdateDetails(
-                          globalPosition: details.globalPosition,
-                          delta: details.delta,
-                        ),
-                        selectedIndex,
-                      );
-                    } else {
-                      setState(() {
-                        _overlayTop = (_overlayTop + details.delta.dy)
-                            .clamp(0.0, collapsed);
-                      });
-                    }
-                  },
-                  onPanEnd: (details) {
-                    _isDraggingOverlay = false;
-                    if (_isHorizontalSwiping) {
-                      _onHorizontalDragEnd(
-                        DragEndDetails(
-                            primaryVelocity:
-                                details.velocity.pixelsPerSecond.dx),
-                        selectedIndex,
-                      );
-                    } else {
-                      _handleDragEnd(context, navBarHeight,
-                          velocity: details.velocity.pixelsPerSecond.dy);
-                    }
-                  },
-                  onTap: () {
-                    final mid = _midTopFor(context, navBarHeight);
-                    double target;
-                    if (_overlayTop < mid / 2) {
-                      target = mid;
-                    } else if (_overlayTop < (mid + collapsed) / 2) {
-                      target = collapsed;
-                    } else {
-                      target = 0;
-                    }
-                    HapticFeedback.mediumImpact();
-                    _animateTo(target);
-                  },
-                  child: Container(
-                    width: double.infinity,
-                    padding: const EdgeInsets.symmetric(vertical: 12),
-                    decoration: BoxDecoration(
-                      gradient: LinearGradient(
-                        begin: Alignment.topCenter,
-                        end: Alignment.bottomCenter,
-                        colors: [
-                          AppColors.bgCard.withValues(alpha: 0.55),
-                          AppColors.bgDark.withValues(alpha: 0.0),
+            color: isOnMap ? Colors.transparent : AppColors.bgDark,
+            child: isOnMap
+                // Map page — no horizontal swipe, rendered directly
+                ? _pageContent(selectedIndex)
+                // Tab pages — with horizontal swipe support
+                : GestureDetector(
+                    behavior: HitTestBehavior.translucent,
+                    onHorizontalDragStart: (details) {
+                      _onHorizontalDragStart(details);
+                    },
+                    onHorizontalDragUpdate: (details) {
+                      _onHorizontalDragUpdate(details, selectedIndex);
+                    },
+                    onHorizontalDragEnd: (details) {
+                      _onHorizontalDragEnd(details, selectedIndex);
+                    },
+                    child: ClipRect(
+                      child: Stack(
+                        children: [
+                          // Current page — slides with the finger
+                          Transform.translate(
+                            offset: Offset(slideTranslation, 0),
+                            child: SizedBox(
+                              width: screenWidth,
+                              child: ScrollConfiguration(
+                                behavior: _ClampingScrollBehavior(),
+                                child: _pageContent(selectedIndex),
+                              ),
+                            ),
+                          ),
+                          // Adjacent page — slides in from the opposite edge
+                          if (adjIndex != null)
+                            Transform.translate(
+                              offset: Offset(
+                                slideOffset > 0
+                                    ? -screenWidth + slideTranslation
+                                    : screenWidth + slideTranslation,
+                                0,
+                              ),
+                              child: SizedBox(
+                                width: screenWidth,
+                                height: double.infinity,
+                                child: Material(
+                                  color: AppColors.bgDark,
+                                  child: AbsorbPointer(
+                                    child: _pageWidgets[adjIndex],
+                                  ),
+                                ),
+                              ),
+                            ),
                         ],
                       ),
                     ),
-                    child: Center(
-                      child: AnimatedContainer(
-                        duration: const Duration(milliseconds: 200),
-                        width: _isDraggingOverlay ? 52 : 44,
-                        height: 5,
-                        decoration: BoxDecoration(
-                          color: AppColors.textMuted.withValues(
-                              alpha: _isDraggingOverlay ? 0.8 : 0.55),
-                          borderRadius: BorderRadius.circular(3),
-                        ),
-                      ),
-                    ),
                   ),
-                ),
-                // Page content
-                Expanded(
-                  child: _overlayTop > 10
-                      ? GestureDetector(
-                          behavior: HitTestBehavior.opaque,
-                          onVerticalDragStart: (_) {
-                            _springController.stop();
-                            _isDraggingOverlay = true;
-                          },
-                          onVerticalDragUpdate: (details) {
-                            setState(() {
-                              _overlayTop = (_overlayTop + details.delta.dy)
-                                  .clamp(0.0, collapsed);
-                            });
-                          },
-                          onVerticalDragEnd: (details) {
-                            _isDraggingOverlay = false;
-                            _handleDragEnd(context, navBarHeight,
-                                velocity: details.primaryVelocity ?? 0);
-                          },
-                          child: AbsorbPointer(child: widget.child),
-                        )
-                      : GestureDetector(
-                          behavior: HitTestBehavior.translucent,
-                          onHorizontalDragStart: (details) {
-                            _onHorizontalDragStart(details);
-                          },
-                          onHorizontalDragUpdate: (details) {
-                            _onHorizontalDragUpdate(details, selectedIndex);
-                          },
-                          onHorizontalDragEnd: (details) {
-                            _onHorizontalDragEnd(details, selectedIndex);
-                          },
-                          child: ClipRect(
-                            child: Stack(
-                              children: [
-                                // Current page — slides with the finger
-                                Transform.translate(
-                                  offset: Offset(slideTranslation, 0),
-                                  child: SizedBox(
-                                    width: screenWidth,
-                                    child: NotificationListener<
-                                        OverscrollNotification>(
-                                      onNotification: (notification) {
-                                        if (notification.overscroll < 0) {
-                                          _springController.stop();
-                                          final rawDelta =
-                                              notification.overscroll.abs();
-                                          final dampingFactor = 1.0 -
-                                              (_overlayTop / collapsed)
-                                                  .clamp(0.0, 0.85);
-                                          final delta =
-                                              rawDelta * 1.8 * dampingFactor;
-                                          _overscrollVelocity = delta * 60;
-                                          setState(() {
-                                            _isDraggingOverlay = true;
-                                            _overlayTop =
-                                                (_overlayTop + delta)
-                                                    .clamp(0.0, collapsed);
-                                          });
-                                          return true;
-                                        }
-                                        return false;
-                                      },
-                                      child: NotificationListener<
-                                          ScrollEndNotification>(
-                                        onNotification: (notification) {
-                                          if (_isDraggingOverlay) {
-                                            _isDraggingOverlay = false;
-                                            if (_overlayTop > 5) {
-                                              _handleDragEnd(
-                                                  context, navBarHeight,
-                                                  velocity:
-                                                      _overscrollVelocity);
-                                            } else {
-                                              _animateTo(0);
-                                            }
-                                          }
-                                          return false;
-                                        },
-                                        child: ScrollConfiguration(
-                                          behavior:
-                                              _ClampingScrollBehavior(),
-                                          child: widget.child,
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                                ),
-                                // Adjacent page — slides in from the opposite edge
-                                if (adjIndex != null)
-                                  Transform.translate(
-                                    offset: Offset(
-                                      slideOffset > 0
-                                          ? -screenWidth + slideTranslation
-                                          : screenWidth + slideTranslation,
-                                      0,
-                                    ),
-                                    child: SizedBox(
-                                      width: screenWidth,
-                                      height: double.infinity,
-                                      child: Material(
-                                        color: AppColors.bgDark,
-                                        child: AbsorbPointer(
-                                          child: _pageWidgets[adjIndex],
-                                        ),
-                                      ),
-                                    ),
-                                  ),
-                              ],
-                            ),
-                          ),
-                        ),
-                ),
-              ],
-            ),
           ),
         ),
 
-        // Layer 3: Bottom nav bar
+        // Bottom nav bar (slides down when map is immersive)
         Positioned(
           left: 0,
           right: 0,
-          bottom: 0,
+          bottom: navBarBottom,
           height: navBarHeight + bottomInset,
           child: bottomNav,
+        ),
+
+        // Explore button — positioned independently for correct hit testing
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: navBarBottom + bottomInset + navBarHeight - 40,
+          child: Center(
+            child: _buildExploreButton(
+                context, AppLocalizations.of(context)!, isOnMap),
+          ),
         ),
       ],
     );
@@ -664,7 +462,6 @@ class _AppShellState extends ConsumerState<AppShell>
                           alertAchievement.longitude!)
                       : 0,
                   onClaim: () {
-                    // Dismiss the alert — claiming happens on the achievements page
                     setState(() => _alertAchievementId = null);
                   },
                   onDismiss: () {
@@ -683,6 +480,7 @@ class _AppShellState extends ConsumerState<AppShell>
     required AppLocalizations l10n,
     required int selectedIndex,
     required double navBarHeight,
+    required bool isOnMap,
   }) {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     final leftTabs = [
@@ -727,6 +525,7 @@ class _AppShellState extends ConsumerState<AppShell>
                       label: tab.label,
                       index: tab.index,
                       selectedIndex: selectedIndex,
+                      isOnMap: isOnMap,
                     ),
                   )),
               const Expanded(child: SizedBox()),
@@ -737,18 +536,10 @@ class _AppShellState extends ConsumerState<AppShell>
                       label: tab.label,
                       index: tab.index,
                       selectedIndex: selectedIndex,
+                      isOnMap: isOnMap,
                     ),
                   )),
             ],
-          ),
-        ),
-        Positioned(
-          bottom: bottomInset + navBarHeight - 40,
-          left: 0,
-          right: 0,
-          child: Center(
-            child: _buildExploreButton(
-                context, AppLocalizations.of(context)!, navBarHeight),
           ),
         ),
       ],
@@ -761,8 +552,9 @@ class _AppShellState extends ConsumerState<AppShell>
     required String label,
     required int index,
     required int selectedIndex,
+    required bool isOnMap,
   }) {
-    final isSelected = index == selectedIndex && !_isExploreMode;
+    final isSelected = index == selectedIndex && !isOnMap;
     const duration = Duration(milliseconds: 250);
     const curve = Curves.easeOutCubic;
     final activeColor = AppColors.primaryLight;
@@ -827,18 +619,18 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   Widget _buildExploreButton(
-      BuildContext context, AppLocalizations l10n, double navBarHeight) {
+      BuildContext context, AppLocalizations l10n, bool isOnMap) {
     const buttonSize = 56.0;
     const duration = Duration(milliseconds: 280);
     const curve = Curves.easeOutCubic;
 
     return GestureDetector(
-      onTap: () => _toggleExploreMode(context, navBarHeight),
+      onTap: () => _onExploreTap(context),
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
           TweenAnimationBuilder<double>(
-            tween: Tween(end: _isExploreMode ? 1.1 : 1.0),
+            tween: Tween(end: isOnMap ? 1.1 : 1.0),
             duration: duration,
             curve: curve,
             builder: (context, scale, child) => Transform.scale(
@@ -852,15 +644,15 @@ class _AppShellState extends ConsumerState<AppShell>
               height: buttonSize,
               decoration: BoxDecoration(
                 shape: BoxShape.circle,
-                gradient: _isExploreMode
+                gradient: isOnMap
                     ? const LinearGradient(
                         colors: [AppColors.primary, AppColors.cyan],
                         begin: Alignment.topLeft,
                         end: Alignment.bottomRight,
                       )
                     : null,
-                color: _isExploreMode ? null : AppColors.bgCardLight,
-                boxShadow: _isExploreMode
+                color: isOnMap ? null : AppColors.bgCardLight,
+                boxShadow: isOnMap
                     ? [
                         BoxShadow(
                           color: AppColors.primary.withValues(alpha: 0.4),
@@ -880,9 +672,9 @@ class _AppShellState extends ConsumerState<AppShell>
                 duration: const Duration(milliseconds: 200),
                 child: Icon(
                   LucideIcons.globe,
-                  key: ValueKey(_isExploreMode),
+                  key: ValueKey(isOnMap),
                   size: 26,
-                  color: _isExploreMode ? Colors.white : AppColors.textMuted,
+                  color: isOnMap ? Colors.white : AppColors.textMuted,
                 ),
               ),
             ),
@@ -893,8 +685,8 @@ class _AppShellState extends ConsumerState<AppShell>
             curve: curve,
             style: TextStyle(
               fontSize: 10,
-              fontWeight: _isExploreMode ? FontWeight.w600 : FontWeight.w400,
-              color: _isExploreMode
+              fontWeight: isOnMap ? FontWeight.w600 : FontWeight.w400,
+              color: isOnMap
                   ? AppColors.primaryLight
                   : AppColors.textMuted.withValues(alpha: 0.6),
               decoration: TextDecoration.none,

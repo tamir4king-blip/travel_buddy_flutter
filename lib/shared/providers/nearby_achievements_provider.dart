@@ -29,7 +29,7 @@ class NearbyAchievementsNotifier extends StateNotifier<NearbyAchievementsState> 
   final Ref _ref;
   final Set<String> _previouslyNearby = {};
 
-  void _recompute(GeolocationState geo) {
+  Future<void> _recompute(GeolocationState geo) async {
     if (!geo.hasLocation) {
       state = const NearbyAchievementsState();
       return;
@@ -69,7 +69,7 @@ class NearbyAchievementsNotifier extends StateNotifier<NearbyAchievementsState> 
         // Skip if already pending
         if (achievement.isPendingClaim) continue;
 
-        final wasMarked = achievementsNotifier.markPendingClaim(achievement.id);
+        final wasMarked = await achievementsNotifier.markPendingClaim(achievement.id);
         if (wasMarked && notificationsEnabled && notificationService != null) {
           final distance = geo.distanceTo(achievement.latitude!, achievement.longitude!);
           notificationService.showProximityNotification(

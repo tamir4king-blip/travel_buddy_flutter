@@ -4,46 +4,39 @@ class MapFilterState {
   final bool showAchievements;
   final bool showQuests;
   final bool showSkills;
-  /// Selected subfilter for achievements (collectionId), null = show all
-  final String? selectedAchievementCollection;
-  /// Selected subfilter for quests (category), null = show all
-  final String? selectedQuestCategory;
-  /// Selected subfilter for skills (skill id), null = show all
-  final String? selectedSkillId;
+  /// Selected subfilters for achievements (collectionIds), empty = show all
+  final Set<String> selectedAchievementCollections;
+  /// Selected subfilters for quests (categories), empty = show all
+  final Set<String> selectedQuestCategories;
+  /// Selected subfilters for skills (skill ids), empty = show all
+  final Set<String> selectedSkillIds;
 
   const MapFilterState({
     this.showAchievements = true,
     this.showQuests = true,
     this.showSkills = true,
-    this.selectedAchievementCollection,
-    this.selectedQuestCategory,
-    this.selectedSkillId,
+    this.selectedAchievementCollections = const {},
+    this.selectedQuestCategories = const {},
+    this.selectedSkillIds = const {},
   });
 
   MapFilterState copyWith({
     bool? showAchievements,
     bool? showQuests,
     bool? showSkills,
-    String? selectedAchievementCollection,
-    String? selectedQuestCategory,
-    String? selectedSkillId,
-    bool clearAchievementCollection = false,
-    bool clearQuestCategory = false,
-    bool clearSkillId = false,
+    Set<String>? selectedAchievementCollections,
+    Set<String>? selectedQuestCategories,
+    Set<String>? selectedSkillIds,
   }) {
     return MapFilterState(
       showAchievements: showAchievements ?? this.showAchievements,
       showQuests: showQuests ?? this.showQuests,
       showSkills: showSkills ?? this.showSkills,
-      selectedAchievementCollection: clearAchievementCollection
-          ? null
-          : (selectedAchievementCollection ?? this.selectedAchievementCollection),
-      selectedQuestCategory: clearQuestCategory
-          ? null
-          : (selectedQuestCategory ?? this.selectedQuestCategory),
-      selectedSkillId: clearSkillId
-          ? null
-          : (selectedSkillId ?? this.selectedSkillId),
+      selectedAchievementCollections:
+          selectedAchievementCollections ?? this.selectedAchievementCollections,
+      selectedQuestCategories:
+          selectedQuestCategories ?? this.selectedQuestCategories,
+      selectedSkillIds: selectedSkillIds ?? this.selectedSkillIds,
     );
   }
 }
@@ -54,43 +47,49 @@ class MapFilterNotifier extends StateNotifier<MapFilterState> {
   void toggleAchievements() =>
       state = state.copyWith(
         showAchievements: !state.showAchievements,
-        clearAchievementCollection: true,
+        selectedAchievementCollections: const {},
       );
 
   void toggleQuests() =>
       state = state.copyWith(
         showQuests: !state.showQuests,
-        clearQuestCategory: true,
+        selectedQuestCategories: const {},
       );
 
   void toggleSkills() =>
       state = state.copyWith(
         showSkills: !state.showSkills,
-        clearSkillId: true,
+        selectedSkillIds: const {},
       );
 
-  void selectAchievementCollection(String? collectionId) {
-    if (collectionId == state.selectedAchievementCollection) {
-      state = state.copyWith(clearAchievementCollection: true);
+  void toggleAchievementCollection(String collectionId) {
+    final current = Set<String>.from(state.selectedAchievementCollections);
+    if (current.contains(collectionId)) {
+      current.remove(collectionId);
     } else {
-      state = state.copyWith(selectedAchievementCollection: collectionId);
+      current.add(collectionId);
     }
+    state = state.copyWith(selectedAchievementCollections: current);
   }
 
-  void selectQuestCategory(String? category) {
-    if (category == state.selectedQuestCategory) {
-      state = state.copyWith(clearQuestCategory: true);
+  void toggleQuestCategory(String category) {
+    final current = Set<String>.from(state.selectedQuestCategories);
+    if (current.contains(category)) {
+      current.remove(category);
     } else {
-      state = state.copyWith(selectedQuestCategory: category);
+      current.add(category);
     }
+    state = state.copyWith(selectedQuestCategories: current);
   }
 
-  void selectSkillId(String? skillId) {
-    if (skillId == state.selectedSkillId) {
-      state = state.copyWith(clearSkillId: true);
+  void toggleSkillId(String skillId) {
+    final current = Set<String>.from(state.selectedSkillIds);
+    if (current.contains(skillId)) {
+      current.remove(skillId);
     } else {
-      state = state.copyWith(selectedSkillId: skillId);
+      current.add(skillId);
     }
+    state = state.copyWith(selectedSkillIds: current);
   }
 }
 

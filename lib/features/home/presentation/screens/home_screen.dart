@@ -10,11 +10,11 @@ import 'package:travel_buddy_mobile/shared/models/user_profile.dart';
 import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/quests_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/user_profile_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/skills_provider.dart';
 import 'package:travel_buddy_mobile/shared/widgets/directional_icon.dart';
 import 'package:travel_buddy_mobile/shared/widgets/xp_progress_bar.dart';
 import 'package:travel_buddy_mobile/shared/widgets/responsive_layout.dart';
 import 'package:travel_buddy_mobile/shared/widgets/visual_extras.dart';
-import 'package:travel_buddy_mobile/shared/providers/city_name_provider.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/widgets/profile_avatar.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
@@ -25,7 +25,9 @@ class HomeScreen extends ConsumerStatefulWidget {
 }
 
 class _HomeScreenState extends ConsumerState<HomeScreen>
-    with SingleTickerProviderStateMixin {
+    with SingleTickerProviderStateMixin, AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
   late final AnimationController _staggerController;
 
   // Interval-based animations for each section
@@ -79,12 +81,13 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final l10n = AppLocalizations.of(context)!;
     final user = ref.watch(userProfileProvider);
     final achievements = ref.watch(achievementsProvider);
     final quests = ref.watch(questsProvider);
 
-    final cityName = ref.watch(cityNameProvider);
+    final skills = ref.watch(skillsProvider);
     final gridCols = ResponsiveLayout.gridColumns(context, mobile: 2, tablet: 3, desktop: 4);
     final isComplete = achievements.completedCollections;
 
@@ -122,32 +125,17 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                       ),
                       const SizedBox(height: 36),
 
-                      // ── Adventures Section ──
+                      // ── Your Stats Section ──
                       FadeTransition(
                         opacity: _adventureFade,
                         child: SlideTransition(
                           position: _adventureSlide,
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              _SectionHeader(title: l10n.nearbyAdventures),
-                              const SizedBox(height: 16),
-                              _AdventureCard(
-                                title: cityName != null ? l10n.exploreCity(cityName) : l10n.exploreYourCity,
-                                subtitle: l10n.achievementsToUnlock(achievements.totalAchievements - achievements.totalUnlocked),
-                                icon: LucideIcons.mapPin,
-                                color: AppColors.primary,
-                                onTap: () => context.go('/map'),
-                              ),
-                              const SizedBox(height: 14),
-                              _AdventureCard(
-                                title: l10n.dailyQuestAvailable,
-                                subtitle: l10n.takePhotoAtLandmark,
-                                icon: LucideIcons.camera,
-                                color: AppColors.accent,
-                                onTap: () => context.go('/quests'),
-                              ),
-                            ],
+                          child: _StatsSection(
+                            quests: quests,
+                            skills: skills,
+                            achievements: achievements,
+                            onSkillsTap: () => context.go('/skills'),
+                            onAchievementsTap: () => context.go('/achievements'),
                           ),
                         ),
                       ),
@@ -566,77 +554,342 @@ class _ProfileStatTile extends StatelessWidget {
   }
 }
 
-// ─── Adventure Card ─────────────────────────────────────────────────────────
+// ─── Stats Section ──────────────────────────────────────────────────────────
 
-class _AdventureCard extends StatelessWidget {
-  final String title;
-  final String subtitle;
-  final IconData icon;
+class _StatsSection extends StatelessWidget {
+  final QuestsState quests;
+  final SkillsState skills;
+  final AchievementsState achievements;
+  final VoidCallback onSkillsTap;
+  final VoidCallback onAchievementsTap;
+
+  const _StatsSection({
+    required this.quests,
+    required this.skills,
+    required this.achievements,
+    required this.onSkillsTap,
+    required this.onAchievementsTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
+    // Get top skills sorted by level (descending), take top 4
+    final topSkillEntries = quests.skillLevels.entries.toList()
+      ..sort((a, b) => b.value.compareTo(a.value));
+    final topSkills = topSkillEntries.take(4).toList();
+
+    // Group achievements by country using id prefix patterns
+    // Local Netanya achievements: collectionId in [beaches, landmarks, parks, culture]
+    // Travel achievements: collectionId in [europe, americas, national-parks, ski-resorts, ...]
+    final localCollections = {'beaches', 'landmarks', 'parks', 'culture'};
+    final localAll = achievements.allAchievements
+        .where((a) => localCollections.contains(a.collectionId))
+        .toList();
+    final localUnlocked = localAll.where((a) => a.isUnlocked).length;
+
+    // Country achievements grouped by collectionId
+    final countryGroups = <String, ({int unlocked, int total})>{};
+    for (final a in achievements.allAchievements) {
+      if (localCollections.contains(a.collectionId)) continue;
+      if (a.collectionId == null) continue;
+      final group = countryGroups[a.collectionId!] ??
+          (unlocked: 0, total: 0);
+      countryGroups[a.collectionId!] = (
+        unlocked: group.unlocked + (a.isUnlocked ? 1 : 0),
+        total: group.total + 1,
+      );
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // ── Top Skills ──
+        _SectionHeader(title: l10n.topSkills),
+        const SizedBox(height: 16),
+        if (topSkills.isEmpty)
+          Container(
+            padding: const EdgeInsets.all(20),
+            decoration: BoxDecoration(
+              color: AppColors.bgCard,
+              borderRadius: BorderRadius.circular(16),
+              border: Border.all(color: AppColors.bgCardLight.withValues(alpha: 0.5)),
+            ),
+            child: Row(
+              children: [
+                Icon(LucideIcons.brain, color: AppColors.textMuted, size: 24),
+                const SizedBox(width: 14),
+                Expanded(
+                  child: Text(
+                    l10n.noSkillsYet,
+                    style: TextStyle(color: AppColors.textSecondary, fontSize: 13),
+                  ),
+                ),
+              ],
+            ),
+          )
+        else
+          ...topSkills.map((entry) {
+            final skill = skills.getSkillById(entry.key);
+            if (skill == null) return const SizedBox.shrink();
+            final level = entry.value;
+            final xp = quests.skillXp[entry.key] ?? 0;
+            final xpInLevel = xp % skill.xpPerLevel;
+            return Padding(
+              padding: const EdgeInsets.only(bottom: 10),
+              child: _SkillRow(
+                icon: skill.icon,
+                name: skill.name,
+                level: level,
+                xpProgress: xpInLevel / skill.xpPerLevel,
+                gradientStart: _parseColor(skill.gradientStart),
+                gradientEnd: _parseColor(skill.gradientEnd),
+                onTap: onSkillsTap,
+              ),
+            );
+          }),
+        if (topSkills.isNotEmpty) ...[
+          const SizedBox(height: 4),
+          Align(
+            alignment: AlignmentDirectional.centerEnd,
+            child: GestureDetector(
+              onTap: onSkillsTap,
+              child: Text(
+                l10n.seeAll,
+                style: TextStyle(
+                  color: AppColors.primary,
+                  fontSize: 13,
+                  fontWeight: FontWeight.w600,
+                ),
+              ),
+            ),
+          ),
+        ],
+        const SizedBox(height: 28),
+
+        // ── Achievement Breakdown ──
+        _SectionHeader(title: l10n.achievements),
+        const SizedBox(height: 16),
+
+        // Local (Netanya) summary
+        _AchievementGroupRow(
+          emoji: '\u{1F3D9}\u{FE0F}',
+          label: 'Netanya',
+          unlocked: localUnlocked,
+          total: localAll.length,
+          color: AppColors.primary,
+          onTap: onAchievementsTap,
+        ),
+
+        // Country-based groups
+        ..._buildCountryRows(countryGroups, l10n, onAchievementsTap),
+      ],
+    );
+  }
+
+  List<Widget> _buildCountryRows(
+    Map<String, ({int unlocked, int total})> groups,
+    AppLocalizations l10n,
+    VoidCallback onTap,
+  ) {
+    const collectionMeta = <String, ({String emoji, String label, Color color})>{
+      'europe': (emoji: '\u{1F1EA}\u{1F1FA}', label: 'Europe', color: Color(0xFF3B82F6)),
+      'americas': (emoji: '\u{1F30E}', label: 'Americas', color: Color(0xFFF59E0B)),
+      'national-parks': (emoji: '\u{1F332}', label: 'National Parks', color: Color(0xFF10B981)),
+      'ski-resorts': (emoji: '\u{26F7}\u{FE0F}', label: 'Ski Resorts', color: Color(0xFF8B5CF6)),
+      'capitals': (emoji: '\u{1F3DB}\u{FE0F}', label: 'Capitals', color: Color(0xFFEF4444)),
+      'ancient-sites': (emoji: '\u{1F3DB}\u{FE0F}', label: 'Ancient Sites', color: Color(0xFFB45309)),
+      'tourist-destinations': (emoji: '\u{2B50}', label: 'Top Destinations', color: Color(0xFFEC4899)),
+    };
+
+    final rows = <Widget>[];
+    for (final entry in groups.entries) {
+      final meta = collectionMeta[entry.key];
+      if (meta == null) continue;
+      rows.add(_AchievementGroupRow(
+        emoji: meta.emoji,
+        label: meta.label,
+        unlocked: entry.value.unlocked,
+        total: entry.value.total,
+        color: meta.color,
+        onTap: onTap,
+      ));
+    }
+    return rows;
+  }
+
+  static Color _parseColor(String hex) {
+    final h = hex.replaceFirst('#', '');
+    return Color(int.parse('FF$h', radix: 16));
+  }
+}
+
+class _SkillRow extends StatelessWidget {
+  final String icon;
+  final String name;
+  final int level;
+  final double xpProgress;
+  final Color gradientStart;
+  final Color gradientEnd;
+  final VoidCallback? onTap;
+
+  const _SkillRow({
+    required this.icon,
+    required this.name,
+    required this.level,
+    required this.xpProgress,
+    required this.gradientStart,
+    required this.gradientEnd,
+    this.onTap,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return GestureDetector(
+      onTap: onTap,
+      behavior: HitTestBehavior.opaque,
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+        decoration: BoxDecoration(
+          color: AppColors.bgCard,
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: gradientStart.withValues(alpha: 0.15)),
+        ),
+        child: Row(
+          children: [
+            Text(icon, style: const TextStyle(fontSize: 22)),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                    children: [
+                      Text(
+                        name,
+                        style: const TextStyle(
+                          fontWeight: FontWeight.w600,
+                          fontSize: 14,
+                        ),
+                      ),
+                      Container(
+                        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                        decoration: BoxDecoration(
+                          gradient: LinearGradient(
+                            colors: [gradientStart, gradientEnd],
+                          ),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Text(
+                          'Lv.$level',
+                          style: const TextStyle(
+                            color: Colors.white,
+                            fontSize: 11,
+                            fontWeight: FontWeight.w800,
+                          ),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 6),
+                  ClipRRect(
+                    borderRadius: BorderRadius.circular(3),
+                    child: LinearProgressIndicator(
+                      value: xpProgress,
+                      backgroundColor: AppColors.bgCardLight.withValues(alpha: 0.5),
+                      valueColor: AlwaysStoppedAnimation(gradientStart),
+                      minHeight: 4,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AchievementGroupRow extends StatelessWidget {
+  final String emoji;
+  final String label;
+  final int unlocked;
+  final int total;
   final Color color;
   final VoidCallback? onTap;
 
-  const _AdventureCard({
-    required this.title,
-    required this.subtitle,
-    required this.icon,
+  const _AchievementGroupRow({
+    required this.emoji,
+    required this.label,
+    required this.unlocked,
+    required this.total,
     required this.color,
     this.onTap,
   });
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTap(
+    final progress = total > 0 ? unlocked / total : 0.0;
+    return GestureDetector(
       onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(18),
-        decoration: BoxDecoration(
-          gradient: LinearGradient(
-            colors: [
-              color.withValues(alpha: 0.10),
-              AppColors.bgCard,
-            ],
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
+      behavior: HitTestBehavior.opaque,
+      child: Padding(
+        padding: const EdgeInsets.only(bottom: 10),
+        child: Container(
+          padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 12),
+          decoration: BoxDecoration(
+            color: AppColors.bgCard,
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(color: color.withValues(alpha: 0.15)),
           ),
-          borderRadius: BorderRadius.circular(16),
-          border: Border.all(color: color.withValues(alpha: 0.15)),
-        ),
-        child: Row(
-          children: [
-            Container(
-              padding: const EdgeInsets.all(13),
-              decoration: BoxDecoration(
-                color: color.withValues(alpha: 0.12),
-                borderRadius: BorderRadius.circular(13),
-                border: Border.all(
-                  color: color.withValues(alpha: 0.15),
+          child: Row(
+            children: [
+              Text(emoji, style: const TextStyle(fontSize: 22)),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          label,
+                          style: const TextStyle(
+                            fontWeight: FontWeight.w600,
+                            fontSize: 14,
+                          ),
+                        ),
+                        Text(
+                          '$unlocked / $total',
+                          style: TextStyle(
+                            color: AppColors.textSecondary,
+                            fontSize: 13,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ],
+                    ),
+                    const SizedBox(height: 6),
+                    ClipRRect(
+                      borderRadius: BorderRadius.circular(3),
+                      child: LinearProgressIndicator(
+                        value: progress,
+                        backgroundColor: AppColors.bgCardLight.withValues(alpha: 0.5),
+                        valueColor: AlwaysStoppedAnimation(color),
+                        minHeight: 4,
+                      ),
+                    ),
+                  ],
                 ),
-                boxShadow: [
-                  BoxShadow(
-                    color: color.withValues(alpha: 0.15),
-                    blurRadius: 8,
-                    spreadRadius: -2,
-                  ),
-                ],
               ),
-              child: Icon(icon, color: color, size: 24),
-            ),
-            const SizedBox(width: 16),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: const TextStyle(fontWeight: FontWeight.w600)),
-                  const SizedBox(height: 3),
-                  Text(
-                    subtitle,
-                    style: const TextStyle(color: AppColors.textSecondary, fontSize: 13),
-                  ),
-                ],
-              ),
-            ),
-            DirectionalChevron(color: AppColors.textMuted, size: 20),
-          ],
+              const SizedBox(width: 10),
+              DirectionalChevron(color: AppColors.textMuted, size: 16),
+            ],
+          ),
         ),
       ),
     );

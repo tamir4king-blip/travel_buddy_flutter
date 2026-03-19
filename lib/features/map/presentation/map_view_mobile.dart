@@ -1,3 +1,4 @@
+import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
 
@@ -22,11 +23,23 @@ class PlatformMapController extends MapViewController {
   // Cache: annotation ID → MapMarkerItem
   final Map<String, MapMarkerItem> _annotationToMarker = {};
 
+  // Radius circle
+  PolygonAnnotationManager? _radiusManager;
+
   @override
   bool get isInitialized => _initialized;
 
   @override
   void Function(String markerId, MapMarkerType type)? onMarkerClick;
+
+  @override
+  void Function(double lat, double lng)? onMapLongPress;
+
+  @override
+  void Function(double lat, double lng)? onMapClick;
+
+  @override
+  VoidCallback? onCameraChanged;
 
   List<MapMarkerItem> get markers => _markers;
   double? get userLat => _userLat;
@@ -55,6 +68,26 @@ class PlatformMapController extends MapViewController {
   }
 
   @override
+  void animateCamera(double lat, double lng, double zoom, {int durationMs = 1000}) {
+    if (!_initialized || _mapboxMap == null) return;
+    _mapboxMap!.flyTo(
+      CameraOptions(
+        center: Point(coordinates: Position(lng, lat)),
+        zoom: zoom,
+      ),
+      MapAnimationOptions(duration: durationMs),
+    );
+  }
+
+  @override
+  Future<({double lat, double lng, double zoom})?> getCameraState() async {
+    if (!_initialized || _mapboxMap == null) return null;
+    final state = await _mapboxMap!.getCameraState();
+    final center = state.center.coordinates;
+    return (lat: center.lat.toDouble(), lng: center.lng.toDouble(), zoom: state.zoom);
+  }
+
+  @override
   void setMarkers(List<MapMarkerItem> markers) {
     _markers = markers;
     onStateChanged?.call();
@@ -68,7 +101,92 @@ class PlatformMapController extends MapViewController {
   }
 
   @override
+  Future<({double x, double y})?> pixelForCoordinate(double lat, double lng) async {
+    if (!_initialized || _mapboxMap == null) return null;
+    final screen = await _mapboxMap!.pixelForCoordinate(
+      Point(coordinates: Position(lng, lat)),
+    );
+    return (x: screen.x, y: screen.y);
+  }
+
+  @override
+  void resetCompass({int durationMs = 500}) {
+    if (!_initialized || _mapboxMap == null) return;
+    _mapboxMap!.flyTo(
+      CameraOptions(bearing: 0),
+      MapAnimationOptions(duration: durationMs),
+    );
+  }
+
+  @override
+  void zoomIn({int durationMs = 300}) async {
+    if (!_initialized || _mapboxMap == null) return;
+    final state = await _mapboxMap!.getCameraState();
+    final newZoom = (state.zoom + 1).clamp(0.0, 22.0);
+    _mapboxMap!.flyTo(
+      CameraOptions(zoom: newZoom),
+      MapAnimationOptions(duration: durationMs),
+    );
+  }
+
+  @override
+  void zoomOut({int durationMs = 300}) async {
+    if (!_initialized || _mapboxMap == null) return;
+    final state = await _mapboxMap!.getCameraState();
+    final newZoom = (state.zoom - 1).clamp(0.0, 22.0);
+    _mapboxMap!.flyTo(
+      CameraOptions(zoom: newZoom),
+      MapAnimationOptions(duration: durationMs),
+    );
+  }
+
+  @override
+  Future<void> showRadiusCircle(double lat, double lng, double radiusMeters, Color color) async {
+    if (!_initialized || _mapboxMap == null) return;
+    await clearRadiusCircle();
+
+    _radiusManager = await _mapboxMap!.annotations.createPolygonAnnotationManager();
+    final points = _geoCircle(lat, lng, radiusMeters, 64);
+    await _radiusManager!.create(PolygonAnnotationOptions(
+      geometry: Polygon(coordinates: [points.map((p) => Position(p.$2, p.$1)).toList()]),
+      fillColor: _colorToArgbInt(color.withValues(alpha: 0.2)),
+      fillOutlineColor: _colorToArgbInt(color),
+      fillOpacity: 1.0,
+    ));
+  }
+
+  @override
+  Future<void> clearRadiusCircle() async {
+    if (_radiusManager != null) {
+      await _radiusManager!.deleteAll();
+      _radiusManager = null;
+    }
+  }
+
+  /// Generate geo-circle points (lat, lng) around a center.
+  static List<(double, double)> _geoCircle(double lat, double lng, double radiusM, int segments) {
+    const earthRadius = 6371000.0;
+    final latRad = lat * math.pi / 180;
+    final lngRad = lng * math.pi / 180;
+    final d = radiusM / earthRadius;
+    final points = <(double, double)>[];
+    for (var i = 0; i <= segments; i++) {
+      final bearing = 2 * math.pi * i / segments;
+      final pLat = math.asin(
+        math.sin(latRad) * math.cos(d) + math.cos(latRad) * math.sin(d) * math.cos(bearing),
+      );
+      final pLng = lngRad + math.atan2(
+        math.sin(bearing) * math.sin(d) * math.cos(latRad),
+        math.cos(d) - math.sin(latRad) * math.sin(pLat),
+      );
+      points.add((pLat * 180 / math.pi, pLng * 180 / math.pi));
+    }
+    return points;
+  }
+
+  @override
   void dispose() {
+    _radiusManager = null;
     _markerManager = null;
     _mapboxMap = null;
   }
@@ -135,8 +253,9 @@ int _colorToArgbInt(Color c) {
 /// Mobile map view using Mapbox Maps SDK with native vector tiles.
 class PlatformMapViewWidget extends StatefulWidget {
   final PlatformMapController controller;
+  final VoidCallback? onMapReady;
 
-  const PlatformMapViewWidget({super.key, required this.controller});
+  const PlatformMapViewWidget({super.key, required this.controller, this.onMapReady});
 
   @override
   State<PlatformMapViewWidget> createState() => _PlatformMapViewWidgetState();
@@ -251,6 +370,9 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
 
     // Sync markers if data already available
     _syncAnnotations();
+
+    // Notify that the map is ready
+    widget.onMapReady?.call();
   }
 
   @override
@@ -260,9 +382,9 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
     final userLng = ctrl.userLng;
     final hasLocation = userLat != null && userLng != null;
 
-    final centerLng = hasLocation ? userLng : 0.0;
-    final centerLat = hasLocation ? userLat : 20.0;
-    final defaultZoom = hasLocation ? 12.0 : 1.0;
+    final centerLng = 0.0;
+    final centerLat = 20.0;
+    final defaultZoom = 1.0;
 
     return MapWidget(
       cameraOptions: CameraOptions(
@@ -271,6 +393,23 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
       ),
       styleUri: MapboxStyles.MAPBOX_STREETS,
       onMapCreated: _onMapCreated,
+      onCameraChangeListener: (_) {
+        widget.controller.onCameraChanged?.call();
+      },
+      onTapListener: (context) {
+        final coords = context.point.coordinates;
+        widget.controller.onMapClick?.call(
+          coords.lat.toDouble(),
+          coords.lng.toDouble(),
+        );
+      },
+      onLongTapListener: (context) {
+        final coords = context.point.coordinates;
+        widget.controller.onMapLongPress?.call(
+          coords.lat.toDouble(),
+          coords.lng.toDouble(),
+        );
+      },
     );
   }
 }

@@ -21,12 +21,17 @@ class SkillsScreen extends ConsumerStatefulWidget {
   ConsumerState<SkillsScreen> createState() => _SkillsScreenState();
 }
 
-class _SkillsScreenState extends ConsumerState<SkillsScreen> {
+class _SkillsScreenState extends ConsumerState<SkillsScreen>
+    with AutomaticKeepAliveClientMixin {
+  @override
+  bool get wantKeepAlive => true;
+
   /// Filter by super-category ID (null = all).
   String? _filterSuperCategory;
 
   @override
   Widget build(BuildContext context) {
+    super.build(context);
     final l10n = AppLocalizations.of(context)!;
     final locale = Localizations.localeOf(context);
     final skillsState = ref.watch(skillsProvider);

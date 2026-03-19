@@ -17,6 +17,7 @@ import 'package:travel_buddy_mobile/shared/providers/persistence_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/notification_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/locale_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/nearby_achievements_provider.dart';
 
 const _mapboxToken = String.fromEnvironment('MAPBOX_TOKEN');
@@ -48,20 +49,12 @@ Future<void> main() async {
   final notificationService = NotificationService();
   await notificationService.init();
 
-  // Request permissions on first launch
-  final permissionService = PermissionService();
-  final alreadyRequested = prefs.getBool(_keyPermissionsRequested) ?? false;
-  if (!alreadyRequested) {
-    await permissionService.requestLocationPermission();
-    await permissionService.requestBackgroundLocationPermission();
-    await permissionService.requestNotificationPermission();
-    await prefs.setBool(_keyPermissionsRequested, true);
-  }
-
-  // Initialize and start background service if permissions are granted
-  await BackgroundService.initialize();
-  if (await permissionService.hasAllPermissions()) {
-    await BackgroundService.start();
+  // Initialize background service (creates notification channel)
+  // but do NOT start it yet — permissions may not be granted
+  try {
+    await BackgroundService.initialize();
+  } catch (_) {
+    // Non-fatal: service just won't be available
   }
 
   // Check if live tracking was enabled before app closed
@@ -96,17 +89,51 @@ class TravelBuddyApp extends ConsumerStatefulWidget {
 class _TravelBuddyAppState extends ConsumerState<TravelBuddyApp>
     with WidgetsBindingObserver {
   bool _trackingRestored = false;
+  bool _permissionsHandled = false;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
 
-    // Restore live tracking after first frame
+    // Run permission flow and tracking restore after the first frame
+    // so the user sees the app UI before system dialogs appear
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _handlePermissionsAndTracking();
+    });
+  }
+
+  Future<void> _handlePermissionsAndTracking() async {
+    if (_permissionsHandled) return;
+    _permissionsHandled = true;
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final permissionService = PermissionService();
+      final alreadyRequested =
+          prefs.getBool(_keyPermissionsRequested) ?? false;
+
+      // First launch: request permissions sequentially with gating
+      if (!alreadyRequested) {
+        await permissionService.requestAllPermissions();
+        await prefs.setBool(_keyPermissionsRequested, true);
+      }
+
+      // Start background service only if safe to do so
+      if (await permissionService.canStartBackgroundService()) {
+        try {
+          await BackgroundService.start();
+        } catch (_) {
+          // Service failed to start — non-fatal
+        }
+      }
+    } catch (_) {
+      // Permission flow failed — app continues without background service
+    }
+
+    // Restore live tracking if it was enabled before app closed
     if (widget.restoreTracking) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        _restoreTracking();
-      });
+      await _restoreTracking();
     }
   }
 
@@ -130,8 +157,11 @@ class _TravelBuddyAppState extends ConsumerState<TravelBuddyApp>
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
-    // When app returns to foreground, re-check proximity
+    // When app returns to foreground, sync pending claims from
+    // the background service and re-check proximity
     if (state == AppLifecycleState.resumed) {
+      ref.read(achievementsProvider.notifier).refreshFromStorage();
+
       final geo = ref.read(geolocationProvider);
       if (geo.isLiveTracking) {
         // Trigger a recomputation of nearby achievements

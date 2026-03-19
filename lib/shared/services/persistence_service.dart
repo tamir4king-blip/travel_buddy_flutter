@@ -172,6 +172,14 @@ class PersistenceService {
     return map.map((k, v) => MapEntry(k, v as String));
   }
 
+  // --- Reload from disk ---
+
+  /// Re-reads SharedPreferences from disk. Call this when the app resumes
+  /// so that changes made by the background isolate become visible.
+  Future<void> reload() async {
+    await _prefs.reload();
+  }
+
   // --- Clear All ---
 
   Future<void> clearAll() async {
