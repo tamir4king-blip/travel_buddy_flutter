@@ -107,6 +107,7 @@ const cookingQuests = <SideQuest>[
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
     latitude: 41.903, longitude: 12.496,
+    locations: [ActivityLocation(latitude: 32.3305, longitude: 34.8560)],
   ),
   SideQuest(
     id: 'campfire-cooking', title: 'Campfire Cooking',
@@ -348,6 +349,7 @@ const campingQuests = <SideQuest>[
     difficulty: QuestDifficulty.medium, xpReward: 55,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.3200, longitude: 34.8450)],
   ),
   SideQuest(
     id: 'hammock-night', title: 'Hammock Night',
@@ -487,6 +489,7 @@ const waterSportsQuests = <SideQuest>[
     difficulty: QuestDifficulty.easy, xpReward: 35,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.3180, longitude: 34.8440)],
   ),
   SideQuest(
     id: 'kayaking', title: 'Kayak Trip',
@@ -658,6 +661,7 @@ const culturalQuests = <SideQuest>[
     difficulty: QuestDifficulty.easy, xpReward: 25,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.3290, longitude: 34.8555)],
   ),
   SideQuest(
     id: 'religious-site', title: 'Religious Site',
@@ -674,6 +678,16 @@ const culturalQuests = <SideQuest>[
     difficulty: QuestDifficulty.medium, xpReward: 50,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.3340, longitude: 34.8462)],
+  ),
+  SideQuest(
+    id: 'art-workshop', title: 'Art Workshop',
+    description: 'Join a local art or painting workshop',
+    category: 'cultural', skillType: 'artist',
+    difficulty: QuestDifficulty.medium, xpReward: 55,
+    isRepeatable: true, maxCompletions: 5,
+    verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.3300, longitude: 34.8558)],
   ),
   SideQuest(
     id: 'language-lesson', title: 'Language Lesson',
@@ -731,6 +745,7 @@ const adventureQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 90,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.3350, longitude: 34.8600)],
   ),
   SideQuest(
     id: 'zip-line', title: 'Zip Line',
@@ -764,6 +779,7 @@ const adventureQuests = <SideQuest>[
     difficulty: QuestDifficulty.hard, xpReward: 85,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.3315, longitude: 34.8545)],
   ),
   SideQuest(
     id: 'helicopter-ride', title: 'Helicopter Ride',
@@ -1136,6 +1152,7 @@ const foodDrinkQuests = <SideQuest>[
     difficulty: QuestDifficulty.medium, xpReward: 50,
     isRepeatable: true, maxCompletions: 5,
     verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.3295, longitude: 34.8550)],
   ),
   SideQuest(
     id: 'beer-brewery', title: 'Brewery Tour',
@@ -1240,6 +1257,7 @@ const transportationQuests = <SideQuest>[
     difficulty: QuestDifficulty.easy, xpReward: 30,
     isRepeatable: true, maxCompletions: 10,
     verification: VerificationMethod.photo,
+    locations: [ActivityLocation(latitude: 32.2950, longitude: 34.8460)],
   ),
   SideQuest(
     id: 'scooter-ride', title: 'Scooter Ride',

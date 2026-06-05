@@ -8,6 +8,9 @@ import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
 import 'package:travel_buddy_mobile/shared/models/achievement.dart';
 
+/// Maximum number of achievements that can be claimed in a single "Claim All".
+const claimAllMaxBatch = 10;
+
 /// Full-screen achievement unlock celebration popup.
 ///
 /// Shows a big trophy animation that scales in with glow + confetti,
@@ -15,7 +18,19 @@ import 'package:travel_buddy_mobile/shared/models/achievement.dart';
 class AchievementUnlockPopup extends StatefulWidget {
   final Achievement achievement;
 
-  const AchievementUnlockPopup({super.key, required this.achievement});
+  /// When true, tapping anywhere on the screen immediately dismisses the popup
+  /// (used during claim-all chains so the user can skip to the next trophy).
+  final bool tapToSkip;
+
+  /// Progress indicator shown during claim-all chains (e.g. "2 / 5").
+  final String? chainProgress;
+
+  const AchievementUnlockPopup({
+    super.key,
+    required this.achievement,
+    this.tapToSkip = false,
+    this.chainProgress,
+  });
 
   /// Show the popup as a full-screen dialog. Returns when dismissed.
   static Future<void> show(BuildContext context, Achievement achievement) {
@@ -28,6 +43,32 @@ class AchievementUnlockPopup extends StatefulWidget {
       pageBuilder: (_, __, ___) =>
           AchievementUnlockPopup(achievement: achievement),
     );
+  }
+
+  /// Show a chain of achievement popups one by one.
+  ///
+  /// Each popup can be skipped by tapping anywhere on the screen, which
+  /// immediately advances to the next achievement. Returns the list of
+  /// achievements that were shown (always equal to [achievements]).
+  static Future<void> showChain(
+    BuildContext context,
+    List<Achievement> achievements,
+  ) async {
+    for (var i = 0; i < achievements.length; i++) {
+      if (!context.mounted) break;
+      HapticFeedback.heavyImpact();
+      await showGeneralDialog(
+        context: context,
+        barrierDismissible: false,
+        barrierColor: Colors.black87,
+        transitionDuration: const Duration(milliseconds: 200),
+        pageBuilder: (_, __, ___) => AchievementUnlockPopup(
+          achievement: achievements[i],
+          tapToSkip: true,
+          chainProgress: '${i + 1} / ${achievements.length}',
+        ),
+      );
+    }
   }
 
   @override
@@ -138,7 +179,7 @@ class _AchievementUnlockPopupState extends State<AchievementUnlockPopup>
     final achievement = widget.achievement;
     final tierColor = _tierColor;
 
-    return Material(
+    Widget content = Material(
       color: Colors.transparent,
       child: Stack(
         children: [
@@ -150,6 +191,20 @@ class _AchievementUnlockPopupState extends State<AchievementUnlockPopup>
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
                   children: [
+                    // ── Chain progress indicator ──
+                    if (widget.chainProgress != null) ...[
+                      Text(
+                        widget.chainProgress!,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: Colors.white.withValues(alpha: 0.5),
+                          letterSpacing: 1.0,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                    ],
+
                     // ── "Achievement Unlocked!" text ──
                     Text(
                       l10n.achievementUnlocked,
@@ -335,7 +390,9 @@ class _AchievementUnlockPopupState extends State<AchievementUnlockPopup>
                                     elevation: 0,
                                   ),
                                   child: Text(
-                                    l10n.awesome,
+                                    widget.tapToSkip
+                                        ? l10n.awesome
+                                        : l10n.awesome,
                                     style: const TextStyle(
                                       fontSize: 16,
                                       fontWeight: FontWeight.w600,
@@ -343,6 +400,18 @@ class _AchievementUnlockPopupState extends State<AchievementUnlockPopup>
                                   ),
                                 ),
                               ),
+
+                              // "Tap to skip" hint during chain
+                              if (widget.tapToSkip) ...[
+                                const SizedBox(height: 12),
+                                Text(
+                                  'Tap anywhere to skip',
+                                  style: TextStyle(
+                                    fontSize: 12,
+                                    color: Colors.white.withValues(alpha: 0.4),
+                                  ),
+                                ),
+                              ],
                             ],
                           ),
                         ),
@@ -403,6 +472,221 @@ class _AchievementUnlockPopupState extends State<AchievementUnlockPopup>
             ),
           ),
         ],
+      ),
+    );
+
+    // Wrap with tap-to-skip gesture when in chain mode
+    if (widget.tapToSkip) {
+      content = GestureDetector(
+        behavior: HitTestBehavior.translucent,
+        onTap: () => Navigator.of(context).pop(),
+        child: content,
+      );
+    }
+
+    return content;
+  }
+}
+
+/// Summary dialog shown after a "Claim All" session completes.
+class ClaimAllSummaryDialog extends StatelessWidget {
+  final List<Achievement> claimed;
+  final int totalXp;
+
+  const ClaimAllSummaryDialog({
+    super.key,
+    required this.claimed,
+    required this.totalXp,
+  });
+
+  static Future<void> show(
+    BuildContext context, {
+    required List<Achievement> claimed,
+    required int totalXp,
+  }) {
+    return showGeneralDialog(
+      context: context,
+      barrierDismissible: true,
+      barrierLabel: 'Dismiss',
+      barrierColor: Colors.black87,
+      transitionDuration: const Duration(milliseconds: 300),
+      pageBuilder: (_, __, ___) => ClaimAllSummaryDialog(
+        claimed: claimed,
+        totalXp: totalXp,
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final l10n = AppLocalizations.of(context)!;
+
+    return Material(
+      color: Colors.transparent,
+      child: SafeArea(
+        child: Center(
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 28),
+            child: Container(
+              constraints: const BoxConstraints(maxWidth: 380),
+              decoration: BoxDecoration(
+                color: AppColors.bgCard,
+                borderRadius: BorderRadius.circular(20),
+                border: Border.all(
+                  color: AppColors.gold.withValues(alpha: 0.3),
+                ),
+                boxShadow: [
+                  BoxShadow(
+                    color: AppColors.gold.withValues(alpha: 0.15),
+                    blurRadius: 30,
+                    spreadRadius: 5,
+                  ),
+                ],
+              ),
+              child: Padding(
+                padding: const EdgeInsets.all(24),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    // Header
+                    const Text(
+                      '🏆',
+                      style: TextStyle(fontSize: 48),
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Claim Summary',
+                      style: TextStyle(
+                        fontSize: 20,
+                        fontWeight: FontWeight.bold,
+                        color: AppColors.textPrimary,
+                      ),
+                    ),
+                    const SizedBox(height: 4),
+                    Text(
+                      '${claimed.length} ${claimed.length == 1 ? 'trophy' : 'trophies'} claimed!',
+                      style: TextStyle(
+                        fontSize: 14,
+                        color: AppColors.textSecondary,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Trophy list
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxHeight: 240),
+                      child: ListView.separated(
+                        shrinkWrap: true,
+                        itemCount: claimed.length,
+                        separatorBuilder: (_, __) => Divider(
+                          color: AppColors.textSecondary.withValues(alpha: 0.15),
+                          height: 1,
+                        ),
+                        itemBuilder: (context, index) {
+                          final a = claimed[index];
+                          final tierColor = switch (a.tier) {
+                            AchievementTier.bronze => AppColors.bronze,
+                            AchievementTier.silver => AppColors.silver,
+                            AchievementTier.gold => AppColors.gold,
+                            AchievementTier.platinum => AppColors.platinum,
+                          };
+                          return Padding(
+                            padding: const EdgeInsets.symmetric(vertical: 10),
+                            child: Row(
+                              children: [
+                                Container(
+                                  width: 8,
+                                  height: 8,
+                                  decoration: BoxDecoration(
+                                    color: tierColor,
+                                    shape: BoxShape.circle,
+                                  ),
+                                ),
+                                const SizedBox(width: 12),
+                                Expanded(
+                                  child: Text(
+                                    a.title,
+                                    style: const TextStyle(
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.w500,
+                                      color: AppColors.textPrimary,
+                                    ),
+                                    maxLines: 1,
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                                Text(
+                                  '+${a.xpReward} XP',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    fontWeight: FontWeight.w600,
+                                    color: AppColors.xpGreen,
+                                  ),
+                                ),
+                              ],
+                            ),
+                          );
+                        },
+                      ),
+                    ),
+                    const SizedBox(height: 16),
+
+                    // Total XP
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 16, vertical: 10),
+                      decoration: BoxDecoration(
+                        color: AppColors.xpGreen.withValues(alpha: 0.12),
+                        borderRadius: BorderRadius.circular(12),
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(LucideIcons.sparkles,
+                              color: AppColors.xpGreen, size: 18),
+                          const SizedBox(width: 8),
+                          Text(
+                            'Total: +$totalXp XP',
+                            style: const TextStyle(
+                              fontSize: 16,
+                              fontWeight: FontWeight.bold,
+                              color: AppColors.xpGreen,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+
+                    // Dismiss
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: () => Navigator.of(context).pop(),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: AppColors.gold,
+                          foregroundColor: Colors.white,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(14),
+                          ),
+                          elevation: 0,
+                        ),
+                        child: Text(
+                          l10n.awesome,
+                          style: const TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

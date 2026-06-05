@@ -6,8 +6,10 @@ import 'package:flutter_background_service/flutter_background_service.dart';
 import 'package:flutter_local_notifications/flutter_local_notifications.dart';
 import 'package:geolocator/geolocator.dart' as geo;
 import 'package:shared_preferences/shared_preferences.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:travel_buddy_mobile/shared/models/achievement.dart';
 import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
+import 'package:travel_buddy_mobile/shared/utils/geo_utils.dart';
 
 class BackgroundService {
   static final FlutterBackgroundService _service = FlutterBackgroundService();
@@ -125,7 +127,7 @@ class _ProximityChecker {
     await _notifications.initialize(initSettings);
 
     _locationAchievements = achievementRegistry
-        .where((a) => a.latitude != null && a.longitude != null && a.claimRadius != null)
+        .where((a) => a.hasGeofence)
         .toList();
   }
 
@@ -150,8 +152,12 @@ class _ProximityChecker {
       _lastLat = lat;
       _lastLng = lng;
 
+      // Reload SharedPreferences to pick up changes from the main isolate
+      await _prefs.reload();
+
       // Load current state from SharedPreferences
-      final unlockedIds = _loadUnlockedIds();
+      final unlockedData = _loadUnlockedData();
+      final unlockedIds = unlockedData.keys.toSet();
       final pendingClaims = _loadPendingClaims();
       final notifiedMap = _loadNotifiedMap();
 
@@ -161,15 +167,54 @@ class _ProximityChecker {
       int nearbyCount = 0;
 
       for (final achievement in _locationAchievements) {
-        // Skip already unlocked
-        if (unlockedIds.contains(achievement.id)) continue;
+        if (!isWithinClaimArea(lat, lng, achievement)) continue;
 
-        final distance = _haversineMeters(
-          lat, lng,
-          achievement.latitude!, achievement.longitude!,
-        );
+        if (unlockedIds.contains(achievement.id)) {
+          // ── Revisit: already unlocked ──
+          // Cooldown anchor: prefer lastVisitedAt, fall back to unlockedAt
+          // so legacy unlocks (or dev-panel forceUnlock) still respect the
+          // cooldown window.
+          final data = unlockedData[achievement.id];
+          final lastVisitedRaw = data?['lastVisitedAt'] as String?;
+          final unlockedRaw = data?['unlockedAt'] as String?;
+          DateTime? anchor;
+          if (lastVisitedRaw != null) {
+            anchor = DateTime.tryParse(lastVisitedRaw);
+          }
+          anchor ??= unlockedRaw != null ? DateTime.tryParse(unlockedRaw) : null;
 
-        if (distance <= achievement.claimRadius!) {
+          final cooldown = AchievementsNotifier.cooldownFor(achievement);
+          if (anchor != null && now.difference(anchor) < cooldown) {
+            continue;
+          }
+
+          // Cooldown passed — actually record the revisit into SharedPreferences
+          // so the diary/timeline, visit count, and Supabase sync all reflect it.
+          final currentCount = (data?['visitCount'] as int?) ?? 1;
+          final newCount = currentCount + 1;
+          final history = <String>[];
+          final existingHistory = data?['revisitHistory'] as List<dynamic>?;
+          if (existingHistory != null) {
+            history.addAll(existingHistory.cast<String>());
+          }
+          history.add(now.toIso8601String());
+
+          if (data != null) {
+            data['visitCount'] = newCount;
+            data['lastVisitedAt'] = now.toIso8601String();
+            data['revisitHistory'] = history;
+            data['isPendingRevisit'] = true;
+            _saveUnlockedData(unlockedData);
+          }
+
+          // Fire revisit notification (with notification cooldown)
+          final lastNotified = notifiedMap[achievement.id] ?? 0;
+          if (nowMs - lastNotified > _notifyCooldownMs) {
+            await _showRevisitNotification(achievement, newCount);
+            notifiedMap[achievement.id] = nowMs;
+          }
+        } else {
+          // ── First-time claim: not yet unlocked ──
           nearbyCount++;
 
           // Mark as pending claim
@@ -200,8 +245,9 @@ class _ProximityChecker {
           content: body,
         );
       }
-    } catch (_) {
+    } catch (e, st) {
       // GPS timeout or error — skip this cycle
+      logError(e, st, context: 'backgroundService.gpsCycle');
     }
   }
 
@@ -226,6 +272,27 @@ class _ProximityChecker {
     );
   }
 
+  Future<void> _showRevisitNotification(
+    Achievement achievement, int visitNumber,
+  ) async {
+    const androidDetails = AndroidNotificationDetails(
+      'proximity_alerts',
+      'Achievement Alerts',
+      channelDescription: 'Notifications for achievement revisits',
+      importance: Importance.high,
+      priority: Priority.high,
+      ongoing: false,
+      autoCancel: true,
+    );
+    const details = NotificationDetails(android: androidDetails);
+    await _notifications.show(
+      achievement.id.hashCode + 10000,
+      'Revisit recorded: ${achievement.title}',
+      'Visit #$visitNumber logged! Open the app to claim it.',
+      details,
+    );
+  }
+
   // ── Haversine ──────────────────────────────────────────────────────────────
 
   static double _haversineMeters(
@@ -245,18 +312,32 @@ class _ProximityChecker {
 
   // ── SharedPreferences helpers ──────────────────────────────────────────────
 
-  Set<String> _loadUnlockedIds() {
+  /// Returns a map of achievement ID → its persisted JSON data (including
+  /// lastVisitedAt, visitCount, etc.) so the background service can
+  /// distinguish first-time claims from revisits and respect cooldowns.
+  Map<String, Map<String, dynamic>> _loadUnlockedData() {
     final raw = _prefs.getString(_keyUnlockedAchievements);
     if (raw == null) return {};
     try {
       final list = jsonDecode(raw) as List<dynamic>;
-      return list
-          .map((e) => (e as Map<String, dynamic>)['id'] as String?)
-          .whereType<String>()
-          .toSet();
-    } catch (_) {
+      final result = <String, Map<String, dynamic>>{};
+      for (final e in list) {
+        final map = e as Map<String, dynamic>;
+        final id = map['id'] as String?;
+        if (id != null) result[id] = map;
+      }
+      return result;
+    } catch (e, st) {
+      logError(e, st, context: 'backgroundService.loadUnlockedData');
       return {};
     }
+  }
+
+  /// Persists updated unlocked data back to SharedPreferences as a JSON list.
+  /// The main isolate reads this on foreground resume to pick up background
+  /// revisit counts.
+  void _saveUnlockedData(Map<String, Map<String, dynamic>> data) {
+    _prefs.setString(_keyUnlockedAchievements, jsonEncode(data.values.toList()));
   }
 
   Map<String, String> _loadPendingClaims() {
@@ -265,7 +346,8 @@ class _ProximityChecker {
     try {
       final map = jsonDecode(raw) as Map<String, dynamic>;
       return map.map((k, v) => MapEntry(k, v as String));
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'backgroundService.loadPendingClaims');
       return {};
     }
   }
@@ -280,7 +362,8 @@ class _ProximityChecker {
     try {
       final map = jsonDecode(raw) as Map<String, dynamic>;
       return map.map((k, v) => MapEntry(k, v as int));
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'backgroundService.loadNotifiedMap');
       return {};
     }
   }

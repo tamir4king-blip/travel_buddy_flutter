@@ -30,8 +30,24 @@ abstract class MapViewController {
   /// Show a translucent circle on the map at the given coordinate with radius in meters.
   Future<void> showRadiusCircle(double lat, double lng, double radiusMeters, Color color);
 
-  /// Remove the radius circle from the map.
+  /// Show a translucent polygon on the map. [polygon] is [[lat, lng], ...].
+  Future<void> showClaimPolygon(List<List<double>> polygon, Color color);
+
+  /// Remove the radius circle / claim polygon from the map.
   Future<void> clearRadiusCircle();
+
+  /// Highlight a marker as "selected" — renders a small black arrow above
+  /// the pin. Pass null to clear.
+  void setSelectedMarker(String? markerId);
+
+  /// Render multiple polygon overlays simultaneously (persistent — not wiped
+  /// by showRadiusCircle/showClaimPolygon). Used for the "show all unlocked
+  /// areas" map filter. Each entry is `(polygon [[lat,lng],...], color)`.
+  Future<void> showUnlockedAreasOverlay(
+      List<({List<List<double>> polygon, Color color})> areas);
+
+  /// Remove the unlocked-areas overlay.
+  Future<void> clearUnlockedAreasOverlay();
 
   void dispose();
 }

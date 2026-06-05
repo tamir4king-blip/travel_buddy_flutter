@@ -132,6 +132,9 @@ class AppLocalizationsEn extends AppLocalizations {
   String get totalXp => 'Total XP';
 
   @override
+  String get totalSkillLevel => 'Skill Level';
+
+  @override
   String get level => 'Level';
 
   @override

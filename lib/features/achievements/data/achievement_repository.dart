@@ -2,6 +2,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:travel_buddy_mobile/shared/models/achievement_detail.dart';
 import 'package:travel_buddy_mobile/shared/providers/supabase_provider.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 
 class AchievementRepository {
   final SupabaseClient _client;
@@ -29,8 +30,9 @@ class AchievementRepository {
       final detail = AchievementDetail.fromJson(data);
       _cache[id] = detail;
       return detail;
-    } catch (_) {
+    } catch (e, st) {
       // Graceful fallback — show local data only
+      logError(e, st, context: 'achievementRepository.getDetail', report: true);
       return null;
     }
   }
@@ -51,7 +53,9 @@ class AchievementRepository {
         details.add(detail);
       }
       return details;
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'achievementRepository.getByCollection',
+          report: true);
       return [];
     }
   }

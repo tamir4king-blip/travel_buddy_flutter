@@ -8,14 +8,24 @@ import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/shared/models/user_profile.dart';
 import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/quest_chain_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/quests_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/user_profile_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/skills_provider.dart';
+import 'package:travel_buddy_mobile/shared/data/skill_registry.dart';
 import 'package:travel_buddy_mobile/shared/widgets/directional_icon.dart';
 import 'package:travel_buddy_mobile/shared/widgets/xp_progress_bar.dart';
 import 'package:travel_buddy_mobile/shared/widgets/responsive_layout.dart';
 import 'package:travel_buddy_mobile/shared/widgets/visual_extras.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/widgets/profile_avatar.dart';
+import 'package:travel_buddy_mobile/shared/models/achievement.dart';
+import 'package:travel_buddy_mobile/shared/models/quest.dart';
+import 'package:travel_buddy_mobile/shared/models/side_quest.dart';
+import 'package:travel_buddy_mobile/features/achievements/presentation/widgets/achievement_detail_sheet.dart';
+import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/zone_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/zone_content_provider.dart';
+import 'package:travel_buddy_mobile/shared/widgets/achievement_unlock_popup.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
   const HomeScreen({super.key});
@@ -110,11 +120,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           position: _profileSlide,
                           child: _ProfileUnit(
                             user: user,
-                            activeSkillCount: quests.skillLevels.length,
-                            totalSkillXp: quests.skillXp.values.fold(0, (a, b) => a + b),
+                            currentTotalLevel: quests.skillLevels.values.fold(0, (a, b) => a + b),
+                            maxTotalLevel: skillRegistry.fold<int>(0, (sum, g) => sum + g.maxLevel),
                             unlockedAchievements: achievements.totalUnlocked,
                             totalAchievements: achievements.totalAchievements,
                             completedQuests: quests.completedCount,
+                            totalQuests: quests.allQuests.length,
                             streakDays: quests.currentStreak,
                             onAvatarTap: () => context.go('/profile'),
                             onSkillsTap: () => context.go('/skills'),
@@ -123,7 +134,22 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
                           ),
                         ),
                       ),
-                      const SizedBox(height: 36),
+                      const SizedBox(height: 20),
+
+                      // ── Pending Trophy Claims ──
+                      _HomePendingClaims(),
+
+                      const SizedBox(height: 12),
+
+                      // ── Pending Quest Chain Claims ──
+                      const _HomeQuestChainClaims(),
+
+                      const SizedBox(height: 20),
+
+                      // ── Nearby Zone Card ──
+                      const _NearbyZoneCard(),
+
+                      const SizedBox(height: 20),
 
                       // ── Your Stats Section ──
                       FadeTransition(
@@ -225,11 +251,12 @@ class _SectionHeader extends StatelessWidget {
 
 class _ProfileUnit extends StatelessWidget {
   final UserProfile user;
-  final int activeSkillCount;
-  final int totalSkillXp;
+  final int currentTotalLevel;
+  final int maxTotalLevel;
   final int unlockedAchievements;
   final int totalAchievements;
   final int completedQuests;
+  final int totalQuests;
   final int streakDays;
   final VoidCallback onAvatarTap;
   final VoidCallback onSkillsTap;
@@ -238,11 +265,12 @@ class _ProfileUnit extends StatelessWidget {
 
   const _ProfileUnit({
     required this.user,
-    required this.activeSkillCount,
-    required this.totalSkillXp,
+    required this.currentTotalLevel,
+    required this.maxTotalLevel,
     required this.unlockedAchievements,
     required this.totalAchievements,
     required this.completedQuests,
+    required this.totalQuests,
     required this.streakDays,
     required this.onAvatarTap,
     required this.onSkillsTap,
@@ -460,8 +488,8 @@ class _ProfileUnit extends StatelessWidget {
                   children: [
                     Expanded(
                       child: _ProfileStatTile(
-                        label: l10n.skills,
-                        value: '$activeSkillCount',
+                        label: l10n.totalSkillLevel,
+                        value: '$currentTotalLevel/$maxTotalLevel',
                         icon: LucideIcons.brain,
                         color: AppColors.xpGlow,
                         onTap: onSkillsTap,
@@ -489,7 +517,7 @@ class _ProfileUnit extends StatelessWidget {
                     Expanded(
                       child: _ProfileStatTile(
                         label: l10n.quests,
-                        value: '$completedQuests',
+                        value: '$completedQuests/$totalQuests',
                         icon: LucideIcons.swords,
                         color: AppColors.accent,
                         onTap: onQuestsTap,
@@ -700,6 +728,8 @@ class _StatsSection extends StatelessWidget {
       'ski-resorts': (emoji: '\u{26F7}\u{FE0F}', label: 'Ski Resorts', color: Color(0xFF8B5CF6)),
       'capitals': (emoji: '\u{1F3DB}\u{FE0F}', label: 'Capitals', color: Color(0xFFEF4444)),
       'ancient-sites': (emoji: '\u{1F3DB}\u{FE0F}', label: 'Ancient Sites', color: Color(0xFFB45309)),
+      'holy-sites': (emoji: '\u{1F6D0}', label: 'Holy Sites', color: Color(0xFFB07A2E)),
+      'seas': (emoji: '\u{1F30A}', label: 'Seas', color: Color(0xFF0277BD)),
       'tourist-destinations': (emoji: '\u{2B50}', label: 'Top Destinations', color: Color(0xFFEC4899)),
     };
 
@@ -1562,4 +1592,1182 @@ class _GlobePainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant CustomPainter oldDelegate) => false;
+}
+
+// ── Nearby Zone Card ──
+class _NearbyZoneCard extends ConsumerStatefulWidget {
+  const _NearbyZoneCard();
+
+  @override
+  ConsumerState<_NearbyZoneCard> createState() => _NearbyZoneCardState();
+}
+
+class _NearbyZoneCardState extends ConsumerState<_NearbyZoneCard> {
+  bool _isRefreshing = false;
+
+  Future<void> _refreshZone() async {
+    if (_isRefreshing) return;
+    setState(() => _isRefreshing = true);
+    try {
+      await ref.read(geolocationProvider.notifier).getCurrentLocation();
+      await ref.read(zoneProvider.notifier).forceRefresh();
+    } finally {
+      if (mounted) setState(() => _isRefreshing = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final zone = ref.watch(zoneProvider);
+    final content = ref.watch(zoneContentProvider);
+    final geo = ref.watch(geolocationProvider);
+
+    final hasLocation = geo.hasLocation;
+
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: AppColors.bgCard,
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(
+          color: hasLocation
+              ? AppColors.primary.withValues(alpha: 0.2)
+              : AppColors.textSecondary.withValues(alpha: 0.15),
+        ),
+      ),
+      child: hasLocation
+          ? _buildContent(zone, content)
+          : _buildNoLocation(),
+    );
+  }
+
+  Widget _buildNoLocation() {
+    return Row(
+      children: [
+        Icon(LucideIcons.mapPinOff, size: 18,
+            color: AppColors.textSecondary.withValues(alpha: 0.5)),
+        const SizedBox(width: 10),
+        Expanded(
+          child: Text(
+            'No location available',
+            style: TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: AppColors.textSecondary.withValues(alpha: 0.6),
+            ),
+          ),
+        ),
+        GestureDetector(
+          onTap: _isRefreshing ? null : _refreshZone,
+          child: _isRefreshing
+              ? SizedBox(
+                  width: 18,
+                  height: 18,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2,
+                    color: AppColors.textSecondary.withValues(alpha: 0.5),
+                  ),
+                )
+              : Icon(LucideIcons.refreshCw, size: 18,
+                  color: AppColors.textSecondary.withValues(alpha: 0.5)),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildContent(ZoneState zone, ZoneContentState content) {
+    final overallPct = (content.overallProgress * 100).round();
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        // Section title
+        Row(
+          children: [
+            Icon(LucideIcons.radar, size: 14, color: AppColors.primary.withValues(alpha: 0.6)),
+            const SizedBox(width: 6),
+            Text(
+              'Current Zone',
+              style: TextStyle(
+                fontSize: 11,
+                fontWeight: FontWeight.w600,
+                color: AppColors.primary.withValues(alpha: 0.6),
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 8),
+
+        // Zone name + refresh + progress %
+        Row(
+          children: [
+            Icon(LucideIcons.mapPin, size: 16, color: AppColors.primary),
+            const SizedBox(width: 8),
+            Expanded(
+              child: Text(
+                zone.hasZone ? zone.displayLabel : 'Your Area',
+                style: const TextStyle(
+                  fontSize: 15,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ),
+            GestureDetector(
+              onTap: _isRefreshing ? null : _refreshZone,
+              child: Padding(
+                padding: const EdgeInsets.only(right: 8),
+                child: _isRefreshing
+                    ? SizedBox(
+                        width: 16,
+                        height: 16,
+                        child: CircularProgressIndicator(
+                          strokeWidth: 2,
+                          color: AppColors.primary.withValues(alpha: 0.5),
+                        ),
+                      )
+                    : Icon(LucideIcons.refreshCw, size: 16,
+                        color: AppColors.primary.withValues(alpha: 0.5)),
+              ),
+            ),
+            Container(
+              padding:
+                  const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+              decoration: BoxDecoration(
+                color: AppColors.primary.withValues(alpha: 0.12),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: Text(
+                '$overallPct%',
+                style: TextStyle(
+                  fontSize: 12,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.primary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+
+        // Overall progress bar
+        _ZoneProgressBar(
+          progress: content.overallProgress,
+          color: AppColors.primary,
+        ),
+        const SizedBox(height: 16),
+
+        // ── Achievements row (location achievements only) ──
+        _ZoneCategory(
+          icon: LucideIcons.trophy,
+          color: AppColors.gold,
+          label: 'Achievements',
+          earned: content.unlockedTravelTrophies,
+          total: content.totalTravelTrophies,
+          progress: content.totalTravelTrophies > 0
+              ? content.unlockedTravelTrophies / content.totalTravelTrophies
+              : 0,
+        ),
+        const SizedBox(height: 10),
+
+        // ── Activities row (quests in zone) ──
+        _ZoneCategory(
+          icon: LucideIcons.compass,
+          color: AppColors.accent,
+          label: 'Activities',
+          earned: content.completedActivities,
+          total: content.totalActivitiesInZone,
+          progress: content.activityProgress,
+        ),
+
+        // ── Story Quests in zone ──
+        if (content.nearbyQuests.isNotEmpty) ...[
+          const SizedBox(height: 10),
+          _ZoneQuestsMiniBar(quests: content.nearbyQuests),
+        ],
+
+        // ── View Details tap target ──
+        const SizedBox(height: 12),
+        GestureDetector(
+          onTap: () => _ZoneDetailSheet.show(context, zone, content),
+          child: Container(
+            width: double.infinity,
+            padding: const EdgeInsets.symmetric(vertical: 8),
+            decoration: BoxDecoration(
+              color: AppColors.primary.withValues(alpha: 0.06),
+              borderRadius: BorderRadius.circular(10),
+              border: Border.all(
+                color: AppColors.primary.withValues(alpha: 0.15),
+              ),
+            ),
+            child: Row(
+              mainAxisAlignment: MainAxisAlignment.center,
+              children: [
+                Icon(LucideIcons.list, size: 14,
+                    color: AppColors.primary.withValues(alpha: 0.7)),
+                const SizedBox(width: 6),
+                Text(
+                  'View All Nearby',
+                  style: TextStyle(
+                    fontSize: 12,
+                    fontWeight: FontWeight.w600,
+                    color: AppColors.primary.withValues(alpha: 0.7),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+class _ZoneProgressBar extends StatelessWidget {
+  final double progress;
+  final Color color;
+
+  const _ZoneProgressBar({required this.progress, required this.color});
+
+  @override
+  Widget build(BuildContext context) {
+    return ClipRRect(
+      borderRadius: BorderRadius.circular(3),
+      child: LinearProgressIndicator(
+        value: progress.clamp(0.0, 1.0),
+        minHeight: 5,
+        backgroundColor: color.withValues(alpha: 0.1),
+        valueColor: AlwaysStoppedAnimation(color),
+      ),
+    );
+  }
+}
+
+class _ZoneCategory extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+  final int earned;
+  final int total;
+  final double progress;
+
+  const _ZoneCategory({
+    required this.icon,
+    required this.color,
+    required this.label,
+    required this.earned,
+    required this.total,
+    required this.progress,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Column(
+      children: [
+        Row(
+          children: [
+            Icon(icon, size: 16, color: color),
+            const SizedBox(width: 8),
+            Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '$earned / $total',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: color,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        _ZoneProgressBar(progress: progress, color: color),
+      ],
+    );
+  }
+}
+
+// ── Story Quests Mini Bar (inside zone card) ──
+class _ZoneQuestsMiniBar extends StatelessWidget {
+  final List<Quest> quests;
+
+  const _ZoneQuestsMiniBar({required this.quests});
+
+  @override
+  Widget build(BuildContext context) {
+    const questColor = Color(0xFF8B5CF6);
+
+    return Column(
+      children: [
+        Row(
+          children: [
+            Icon(LucideIcons.scroll, size: 16, color: questColor),
+            const SizedBox(width: 8),
+            Text(
+              'Quests',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w600,
+                color: AppColors.textPrimary,
+              ),
+            ),
+            const Spacer(),
+            Text(
+              '${quests.length} active nearby',
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w700,
+                color: questColor,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        SizedBox(
+          height: 28,
+          child: ListView.separated(
+            scrollDirection: Axis.horizontal,
+            itemCount: quests.length,
+            separatorBuilder: (_, __) => const SizedBox(width: 6),
+            itemBuilder: (context, index) {
+              final quest = quests[index];
+              final stepsLeft = quest.totalSteps - quest.completedStepCount;
+              return Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+                decoration: BoxDecoration(
+                  color: questColor.withValues(alpha: 0.1),
+                  borderRadius: BorderRadius.circular(8),
+                  border:
+                      Border.all(color: questColor.withValues(alpha: 0.25)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(quest.icon, style: const TextStyle(fontSize: 12)),
+                    const SizedBox(width: 4),
+                    ConstrainedBox(
+                      constraints: const BoxConstraints(maxWidth: 90),
+                      child: Text(
+                        quest.title,
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: questColor,
+                        ),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                    const SizedBox(width: 4),
+                    Text(
+                      '$stepsLeft left',
+                      style: TextStyle(
+                        fontSize: 10,
+                        color: questColor.withValues(alpha: 0.7),
+                      ),
+                    ),
+                  ],
+                ),
+              );
+            },
+          ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Zone Detail Sheet ──
+class _ZoneDetailSheet extends StatelessWidget {
+  final ZoneState zone;
+  final ZoneContentState content;
+
+  const _ZoneDetailSheet({required this.zone, required this.content});
+
+  static Future<void> show(
+    BuildContext context,
+    ZoneState zone,
+    ZoneContentState content,
+  ) {
+    return showModalBottomSheet(
+      context: context,
+      backgroundColor: AppColors.bgCard,
+      isScrollControlled: true,
+      shape: const RoundedRectangleBorder(
+        borderRadius: BorderRadius.vertical(top: Radius.circular(24)),
+      ),
+      builder: (_) => DraggableScrollableSheet(
+        initialChildSize: 0.7,
+        minChildSize: 0.4,
+        maxChildSize: 0.92,
+        expand: false,
+        builder: (context, scrollController) => _ZoneDetailContent(
+          zone: zone,
+          content: content,
+          scrollController: scrollController,
+        ),
+      ),
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) => const SizedBox.shrink();
+}
+
+class _ZoneDetailContent extends StatelessWidget {
+  final ZoneState zone;
+  final ZoneContentState content;
+  final ScrollController scrollController;
+
+  const _ZoneDetailContent({
+    required this.zone,
+    required this.content,
+    required this.scrollController,
+  });
+
+  String _formatDistance(double meters) {
+    if (meters < 1000) return '${meters.round()}m';
+    return '${(meters / 1000).toStringAsFixed(1)}km';
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    // Build unified list sorted by distance
+    final items = <_ZoneDetailItem>[];
+
+    for (final nearby in content.nearbyAchievements) {
+      items.add(_ZoneDetailItem(
+        type: _ZoneItemType.achievement,
+        title: nearby.item.title,
+        distanceMeters: nearby.distanceMeters,
+        achievement: nearby.item,
+        isCompleted: nearby.item.isUnlocked,
+        isPending: nearby.item.isPendingClaim && !nearby.item.isUnlocked,
+        subtitle: _tierLabel(nearby.item.tier),
+        xp: nearby.item.xpReward,
+      ));
+    }
+
+    for (final nearby in content.nearbyActivities) {
+      items.add(_ZoneDetailItem(
+        type: _ZoneItemType.activity,
+        title: nearby.item.title,
+        distanceMeters: nearby.distanceMeters,
+        activity: nearby.item,
+        isCompleted: nearby.item.completionCount > 0,
+        subtitle: nearby.item.category,
+        xp: nearby.item.xpReward,
+      ));
+    }
+
+    for (final quest in content.nearbyQuests) {
+      items.add(_ZoneDetailItem(
+        type: _ZoneItemType.quest,
+        title: quest.title,
+        distanceMeters: -1, // quests don't have a single location
+        quest: quest,
+        isCompleted: quest.isCompleted,
+        subtitle:
+            '${quest.completedStepCount}/${quest.totalSteps} steps',
+        xp: quest.xpReward,
+        icon: quest.icon,
+      ));
+    }
+
+    // Sort: quests first (no distance), then by distance
+    items.sort((a, b) {
+      if (a.distanceMeters < 0 && b.distanceMeters < 0) return 0;
+      if (a.distanceMeters < 0) return 1;
+      if (b.distanceMeters < 0) return 1;
+      return a.distanceMeters.compareTo(b.distanceMeters);
+    });
+
+    final achievementCount = content.nearbyAchievements.length;
+    final activityCount = content.nearbyActivities.length;
+    final questCount = content.nearbyQuests.length;
+
+    return ListView(
+      controller: scrollController,
+      padding: const EdgeInsets.fromLTRB(20, 16, 20, 32),
+      children: [
+        // Drag handle
+        Center(
+          child: Container(
+            width: 40,
+            height: 4,
+            decoration: BoxDecoration(
+              color: AppColors.textMuted.withValues(alpha: 0.3),
+              borderRadius: BorderRadius.circular(2),
+            ),
+          ),
+        ),
+        const SizedBox(height: 20),
+
+        // Title
+        Row(
+          children: [
+            Icon(LucideIcons.radar, size: 20, color: AppColors.primary),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                zone.hasZone ? zone.displayLabel : 'Your Area',
+                style: const TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.w700,
+                  color: AppColors.textPrimary,
+                ),
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 6),
+        Text(
+          'Within 100km radius',
+          style: TextStyle(
+            fontSize: 13,
+            color: AppColors.textMuted,
+          ),
+        ),
+        const SizedBox(height: 16),
+
+        // Summary chips
+        Wrap(
+          spacing: 8,
+          runSpacing: 8,
+          children: [
+            _SummaryChip(
+              icon: LucideIcons.trophy,
+              color: AppColors.gold,
+              label: '$achievementCount achievements',
+            ),
+            _SummaryChip(
+              icon: LucideIcons.compass,
+              color: AppColors.accent,
+              label: '$activityCount activities',
+            ),
+            if (questCount > 0)
+              _SummaryChip(
+                icon: LucideIcons.scroll,
+                color: const Color(0xFF8B5CF6),
+                label: '$questCount quests',
+              ),
+          ],
+        ),
+        const SizedBox(height: 20),
+
+        // Divider
+        const Divider(height: 1),
+        const SizedBox(height: 12),
+
+        // Items list
+        if (items.isEmpty)
+          Padding(
+            padding: const EdgeInsets.symmetric(vertical: 40),
+            child: Center(
+              child: Text(
+                'No nearby items found',
+                style: TextStyle(
+                  fontSize: 14,
+                  color: AppColors.textMuted,
+                ),
+              ),
+            ),
+          )
+        else
+          for (var i = 0; i < items.length; i++) ...[
+            if (i > 0) const SizedBox(height: 2),
+            _ZoneDetailRow(
+              item: items[i],
+              formatDistance: _formatDistance,
+            ),
+          ],
+      ],
+    );
+  }
+
+  String _tierLabel(AchievementTier tier) => switch (tier) {
+        AchievementTier.bronze => 'Bronze',
+        AchievementTier.silver => 'Silver',
+        AchievementTier.gold => 'Gold',
+        AchievementTier.platinum => 'Platinum',
+      };
+}
+
+enum _ZoneItemType { achievement, activity, quest }
+
+class _ZoneDetailItem {
+  final _ZoneItemType type;
+  final String title;
+  final double distanceMeters;
+  final Achievement? achievement;
+  final SideQuest? activity;
+  final Quest? quest;
+  final bool isCompleted;
+  final bool isPending;
+  final String subtitle;
+  final int xp;
+  final String? icon;
+
+  const _ZoneDetailItem({
+    required this.type,
+    required this.title,
+    required this.distanceMeters,
+    this.achievement,
+    this.activity,
+    this.quest,
+    this.isCompleted = false,
+    this.isPending = false,
+    required this.subtitle,
+    required this.xp,
+    this.icon,
+  });
+}
+
+class _ZoneDetailRow extends StatelessWidget {
+  final _ZoneDetailItem item;
+  final String Function(double) formatDistance;
+
+  const _ZoneDetailRow({
+    required this.item,
+    required this.formatDistance,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    final (typeIcon, typeColor) = switch (item.type) {
+      _ZoneItemType.achievement => (LucideIcons.trophy, AppColors.gold),
+      _ZoneItemType.activity => (LucideIcons.compass, AppColors.accent),
+      _ZoneItemType.quest => (LucideIcons.scroll, const Color(0xFF8B5CF6)),
+    };
+
+    return InkWell(
+      onTap: () => _onTap(context),
+      borderRadius: BorderRadius.circular(10),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 8),
+        child: Row(
+          children: [
+            // Type icon
+            Container(
+              width: 32,
+              height: 32,
+              decoration: BoxDecoration(
+                color: typeColor.withValues(alpha: 0.1),
+                borderRadius: BorderRadius.circular(8),
+              ),
+              child: item.icon != null
+                  ? Center(
+                      child:
+                          Text(item.icon!, style: const TextStyle(fontSize: 16)))
+                  : Icon(typeIcon, size: 16, color: typeColor),
+            ),
+            const SizedBox(width: 12),
+
+            // Title + subtitle
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    item.title,
+                    style: TextStyle(
+                      fontSize: 14,
+                      fontWeight: FontWeight.w600,
+                      color: item.isPending
+                          ? AppColors.gold
+                          : AppColors.textPrimary,
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Row(
+                    children: [
+                      Text(
+                        item.subtitle,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: AppColors.textMuted,
+                        ),
+                      ),
+                      const SizedBox(width: 6),
+                      Icon(LucideIcons.zap,
+                          size: 10, color: AppColors.xpGreen),
+                      const SizedBox(width: 2),
+                      Text(
+                        '+${item.xp}',
+                        style: TextStyle(
+                          fontSize: 11,
+                          fontWeight: FontWeight.w600,
+                          color: AppColors.xpGreen,
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+
+            // Distance
+            if (item.distanceMeters >= 0) ...[
+              const SizedBox(width: 8),
+              Text(
+                formatDistance(item.distanceMeters),
+                style: TextStyle(
+                  fontSize: 12,
+                  color: AppColors.textMuted,
+                  fontWeight: FontWeight.w500,
+                ),
+              ),
+            ],
+            const SizedBox(width: 8),
+
+            // Status
+            if (item.isPending)
+              Container(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                decoration: BoxDecoration(
+                  gradient: const LinearGradient(
+                    colors: [AppColors.gold, AppColors.accent],
+                  ),
+                  borderRadius: BorderRadius.circular(6),
+                ),
+                child: const Text(
+                  'Claim',
+                  style: TextStyle(
+                    color: Colors.white,
+                    fontSize: 10,
+                    fontWeight: FontWeight.w700,
+                  ),
+                ),
+              )
+            else
+              Icon(
+                item.isCompleted ? LucideIcons.check : LucideIcons.chevronRight,
+                size: 16,
+                color: item.isCompleted
+                    ? AppColors.success
+                    : AppColors.textMuted.withValues(alpha: 0.4),
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  void _onTap(BuildContext context) {
+    switch (item.type) {
+      case _ZoneItemType.achievement:
+        if (item.achievement != null) {
+          AchievementDetailSheet.show(context, item.achievement!);
+        }
+      case _ZoneItemType.activity:
+        if (item.activity != null) {
+          context.push(
+              '/skills/${item.activity!.skillType}/activity/${item.activity!.id}');
+        }
+      case _ZoneItemType.quest:
+        // No dedicated quest detail screen — just dismiss
+        break;
+    }
+  }
+}
+
+class _SummaryChip extends StatelessWidget {
+  final IconData icon;
+  final Color color;
+  final String label;
+
+  const _SummaryChip({
+    required this.icon,
+    required this.color,
+    required this.label,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+      decoration: BoxDecoration(
+        color: color.withValues(alpha: 0.1),
+        borderRadius: BorderRadius.circular(8),
+        border: Border.all(color: color.withValues(alpha: 0.2)),
+      ),
+      child: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(icon, size: 14, color: color),
+          const SizedBox(width: 6),
+          Text(
+            label,
+            style: TextStyle(
+              fontSize: 12,
+              fontWeight: FontWeight.w600,
+              color: color,
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Pending Quest Chain Claims Banner for Home Screen ──
+class _HomeQuestChainClaims extends ConsumerWidget {
+  const _HomeQuestChainClaims();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final chainState = ref.watch(questChainProvider);
+    final claimable = chainState.claimableQuests;
+
+    if (claimable.isEmpty) return const SizedBox.shrink();
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: [
+            const Color(0xFF8B5CF6).withValues(alpha: 0.15),
+            AppColors.primary.withValues(alpha: 0.08),
+          ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: const Color(0xFF8B5CF6).withValues(alpha: 0.4),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Row(
+              children: [
+                Icon(LucideIcons.scroll, size: 16, color: const Color(0xFF8B5CF6)),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    '${claimable.length} ${claimable.length == 1 ? 'quest' : 'quests'} ready to claim!',
+                    style: const TextStyle(
+                      color: Color(0xFF8B5CF6),
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+          SizedBox(
+            height: 44,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              itemCount: claimable.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 8),
+              itemBuilder: (context, index) {
+                final quest = claimable[index];
+                return GestureDetector(
+                  onTap: () {
+                    ref.read(questChainProvider.notifier).claimQuest(quest.id);
+                  },
+                  child: Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                    decoration: BoxDecoration(
+                      gradient: const LinearGradient(
+                        colors: [Color(0xFF8B5CF6), Color(0xFFA78BFA)],
+                      ),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(quest.icon, style: const TextStyle(fontSize: 14)),
+                        const SizedBox(width: 6),
+                        ConstrainedBox(
+                          constraints: const BoxConstraints(maxWidth: 120),
+                          child: Text(
+                            quest.title,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontWeight: FontWeight.w600,
+                              fontSize: 12,
+                            ),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        const SizedBox(width: 6),
+                        Text(
+                          '+${quest.xpReward} XP',
+                          style: TextStyle(
+                            color: Colors.white.withValues(alpha: 0.85),
+                            fontWeight: FontWeight.w500,
+                            fontSize: 11,
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+// ── Pending Claims Banner for Home Screen ──
+// Always visible — shows pending trophies/revisits, or a waiting state.
+class _HomePendingClaims extends ConsumerWidget {
+  const _HomePendingClaims();
+
+  Future<void> _claimAll(
+    BuildContext context,
+    WidgetRef ref,
+    List<Achievement> pending,
+  ) async {
+    final navContext = Navigator.of(context, rootNavigator: true).context;
+    final notifier = ref.read(achievementsProvider.notifier);
+    final batch = pending.take(claimAllMaxBatch).toList();
+    final claimed = <Achievement>[];
+    var totalXp = 0;
+
+    for (final achievement in batch) {
+      final success = await notifier.confirmPendingClaim(achievement.id);
+      if (success) {
+        claimed.add(achievement);
+        totalXp += achievement.xpReward;
+      }
+    }
+
+    if (claimed.isEmpty || !navContext.mounted) return;
+
+    await AchievementUnlockPopup.showChain(navContext, claimed);
+
+    if (navContext.mounted) {
+      await ClaimAllSummaryDialog.show(
+        navContext,
+        claimed: claimed,
+        totalXp: totalXp,
+      );
+    }
+  }
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final achievements = ref.watch(achievementsProvider);
+    final pendingClaims = achievements.allAchievements
+        .where((a) => a.isPendingClaim && !a.isUnlocked)
+        .toList();
+    final pendingRevisits = achievements.allAchievements
+        .where((a) => a.isPendingRevisit && a.isUnlocked)
+        .toList();
+    final hasPending = pendingClaims.isNotEmpty || pendingRevisits.isNotEmpty;
+    final totalPending = pendingClaims.length + pendingRevisits.length;
+
+    return Container(
+      decoration: BoxDecoration(
+        gradient: LinearGradient(
+          colors: hasPending
+              ? [
+                  AppColors.gold.withValues(alpha: 0.15),
+                  AppColors.accent.withValues(alpha: 0.08),
+                ]
+              : [
+                  AppColors.bgCard,
+                  AppColors.bgCard,
+                ],
+        ),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: hasPending
+              ? AppColors.gold.withValues(alpha: 0.4)
+              : AppColors.bgCardLight.withValues(alpha: 0.5),
+        ),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(14, 12, 14, 8),
+            child: Row(
+              children: [
+                Icon(
+                  LucideIcons.trophy,
+                  size: 16,
+                  color: hasPending ? AppColors.gold : AppColors.textMuted,
+                ),
+                const SizedBox(width: 8),
+                Expanded(
+                  child: Text(
+                    hasPending
+                        ? '$totalPending ${totalPending == 1 ? 'trophy' : 'trophies'} ready to claim!'
+                        : 'No trophies to claim yet',
+                    style: TextStyle(
+                      color: hasPending ? AppColors.gold : AppColors.textMuted,
+                      fontWeight: FontWeight.w700,
+                      fontSize: 13,
+                    ),
+                  ),
+                ),
+                if (pendingClaims.length > 1)
+                  GestureDetector(
+                    onTap: () => _claimAll(context, ref, pendingClaims),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 10, vertical: 4),
+                      decoration: BoxDecoration(
+                        gradient: const LinearGradient(
+                          colors: [AppColors.gold, AppColors.accent],
+                        ),
+                        borderRadius: BorderRadius.circular(8),
+                      ),
+                      child: const Text(
+                        'Claim All',
+                        style: TextStyle(
+                          color: Colors.white,
+                          fontWeight: FontWeight.w700,
+                          fontSize: 12,
+                        ),
+                      ),
+                    ),
+                  ),
+              ],
+            ),
+          ),
+          if (hasPending)
+            SizedBox(
+              height: 44,
+              child: ListView.separated(
+                scrollDirection: Axis.horizontal,
+                padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+                itemCount: totalPending,
+                separatorBuilder: (_, __) => const SizedBox(width: 8),
+                itemBuilder: (context, index) {
+                  // Show pending claims first, then revisits
+                  final isRevisit = index >= pendingClaims.length;
+                  final achievement = isRevisit
+                      ? pendingRevisits[index - pendingClaims.length]
+                      : pendingClaims[index];
+
+                  return GestureDetector(
+                    onTap: () async {
+                      final navContext =
+                          Navigator.of(context, rootNavigator: true).context;
+                      final notifier =
+                          ref.read(achievementsProvider.notifier);
+                      if (isRevisit) {
+                        final acknowledged =
+                            await notifier.acknowledgeRevisit(achievement.id);
+                        if (acknowledged && context.mounted) {
+                          ScaffoldMessenger.of(context).showSnackBar(
+                            SnackBar(
+                              content: Row(
+                                children: [
+                                  const Icon(LucideIcons.footprints,
+                                      size: 16, color: Colors.white),
+                                  const SizedBox(width: 8),
+                                  Text(
+                                      'Visit #${achievement.visitCount} claimed — ${achievement.title}'),
+                                ],
+                              ),
+                              backgroundColor: AppColors.info,
+                              behavior: SnackBarBehavior.floating,
+                              duration: const Duration(seconds: 2),
+                            ),
+                          );
+                        }
+                      } else {
+                        final claimed =
+                            await notifier.confirmPendingClaim(achievement.id);
+                        if (claimed && navContext.mounted) {
+                          await AchievementUnlockPopup.show(
+                              navContext, achievement);
+                        }
+                      }
+                    },
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                          horizontal: 12, vertical: 6),
+                      decoration: BoxDecoration(
+                        gradient: LinearGradient(
+                          colors: isRevisit
+                              ? [AppColors.info, AppColors.info.withValues(alpha: 0.8)]
+                              : [AppColors.primary, AppColors.primaryLight],
+                        ),
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          Icon(
+                            isRevisit
+                                ? LucideIcons.footprints
+                                : LucideIcons.sparkles,
+                            size: 14,
+                            color: Colors.white,
+                          ),
+                          const SizedBox(width: 6),
+                          ConstrainedBox(
+                            constraints: const BoxConstraints(maxWidth: 120),
+                            child: Text(
+                              achievement.title,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontWeight: FontWeight.w600,
+                                fontSize: 12,
+                              ),
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                          const SizedBox(width: 6),
+                          Text(
+                            isRevisit
+                                ? 'Claim Revisit'
+                                : '+${achievement.xpReward} XP',
+                            style: TextStyle(
+                              color: Colors.white.withValues(alpha: 0.85),
+                              fontWeight: FontWeight.w500,
+                              fontSize: 11,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  );
+                },
+              ),
+            )
+          else
+            Padding(
+              padding: const EdgeInsets.fromLTRB(14, 0, 14, 12),
+              child: Text(
+                'Explore the map to discover trophies nearby!',
+                style: TextStyle(
+                  color: AppColors.textMuted,
+                  fontSize: 12,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
 }

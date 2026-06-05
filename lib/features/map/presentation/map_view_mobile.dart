@@ -5,6 +5,7 @@ import 'dart:ui' as ui;
 import 'package:flutter/material.dart';
 import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:travel_buddy_mobile/features/map/models/map_marker_item.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/map_view_interface.dart';
 
@@ -23,8 +24,26 @@ class PlatformMapController extends MapViewController {
   // Cache: annotation ID → MapMarkerItem
   final Map<String, MapMarkerItem> _annotationToMarker = {};
 
-  // Radius circle
+  // Radius circle / single-polygon preview (cleared on each new selection)
   PolygonAnnotationManager? _radiusManager;
+
+  // Persistent overlay for "show all unlocked areas" toggle (independent from
+  // the radius preview — doesn't get wiped by pin taps).
+  PolygonAnnotationManager? _unlockedAreasManager;
+
+  // Currently-selected marker (tapped) — draws the black arrow above.
+  String? _selectedMarkerId;
+  void Function(String? newId, String? previousId)? _onSelectionChanged;
+
+  /// Highlight a marker as "selected" — re-renders its pin with the black
+  /// arrow indicator. Pass null to clear the selection.
+  @override
+  void setSelectedMarker(String? markerId) {
+    if (_selectedMarkerId == markerId) return;
+    final previous = _selectedMarkerId;
+    _selectedMarkerId = markerId;
+    _onSelectionChanged?.call(markerId, previous);
+  }
 
   @override
   bool get isInitialized => _initialized;
@@ -156,10 +175,65 @@ class PlatformMapController extends MapViewController {
   }
 
   @override
+  Future<void> showClaimPolygon(List<List<double>> polygon, Color color) async {
+    if (!_initialized || _mapboxMap == null) return;
+    if (polygon.length < 3) return;
+    await clearRadiusCircle();
+
+    _radiusManager = await _mapboxMap!.annotations.createPolygonAnnotationManager();
+    final positions = polygon.map((p) => Position(p[1], p[0])).toList();
+    // Close the ring if not already closed
+    if (positions.first.lng != positions.last.lng ||
+        positions.first.lat != positions.last.lat) {
+      positions.add(positions.first);
+    }
+    await _radiusManager!.create(PolygonAnnotationOptions(
+      geometry: Polygon(coordinates: [positions]),
+      fillColor: _colorToArgbInt(color.withValues(alpha: 0.55)),
+      fillOutlineColor: _colorToArgbInt(color),
+      fillOpacity: 1.0,
+    ));
+  }
+
+  @override
   Future<void> clearRadiusCircle() async {
     if (_radiusManager != null) {
       await _radiusManager!.deleteAll();
       _radiusManager = null;
+    }
+  }
+
+  @override
+  Future<void> showUnlockedAreasOverlay(
+      List<({List<List<double>> polygon, Color color})> areas) async {
+    if (!_initialized || _mapboxMap == null) return;
+    await clearUnlockedAreasOverlay();
+    if (areas.isEmpty) return;
+
+    _unlockedAreasManager =
+        await _mapboxMap!.annotations.createPolygonAnnotationManager();
+
+    for (final a in areas) {
+      if (a.polygon.length < 3) continue;
+      final positions = a.polygon.map((p) => Position(p[1], p[0])).toList();
+      if (positions.first.lng != positions.last.lng ||
+          positions.first.lat != positions.last.lat) {
+        positions.add(positions.first);
+      }
+      await _unlockedAreasManager!.create(PolygonAnnotationOptions(
+        geometry: Polygon(coordinates: [positions]),
+        fillColor: _colorToArgbInt(a.color.withValues(alpha: 0.55)),
+        fillOutlineColor: _colorToArgbInt(a.color),
+        fillOpacity: 1.0,
+      ));
+    }
+  }
+
+  @override
+  Future<void> clearUnlockedAreasOverlay() async {
+    if (_unlockedAreasManager != null) {
+      await _unlockedAreasManager!.deleteAll();
+      _unlockedAreasManager = null;
     }
   }
 
@@ -187,6 +261,7 @@ class PlatformMapController extends MapViewController {
   @override
   void dispose() {
     _radiusManager = null;
+    _unlockedAreasManager = null;
     _markerManager = null;
     _mapboxMap = null;
   }
@@ -197,44 +272,79 @@ PlatformMapController createMapController({required String token}) {
   return PlatformMapController();
 }
 
-/// Generates a colored map pin icon as PNG bytes.
-Future<Uint8List> _renderMarkerIcon(Color color, {int size = 96}) async {
+/// Renders a map pin as PNG bytes: tier-colored stroke around a category
+/// icon, with an optional black upward arrow above when [selected].
+Future<Uint8List> _renderMarkerIcon({
+  required Color tierColor,
+  required IconData icon,
+  required bool locked,
+  required bool selected,
+  int size = 96,
+}) async {
   final recorder = ui.PictureRecorder();
   final canvas = Canvas(recorder);
-  final paint = Paint()..color = color;
-  final borderPaint = Paint()
-    ..color = Colors.white
-    ..style = PaintingStyle.stroke
-    ..strokeWidth = size * 0.06;
 
-  final center = Offset(size / 2, size * 0.38);
-  final radius = size * 0.3;
+  // Reserve top space for the selection arrow
+  final arrowBaseY = size * 0.18;
+  final circleCenter = Offset(size / 2, size * 0.55);
+  final circleRadius = size * 0.3;
 
-  // Circle body
-  canvas.drawCircle(center, radius, paint);
-  canvas.drawCircle(center, radius, borderPaint);
+  // 1) Selection arrow (small black upward triangle) — above the circle
+  if (selected) {
+    final tipY = size * 0.03;
+    final arrowPath = Path()
+      ..moveTo(size / 2 - size * 0.09, arrowBaseY)
+      ..lineTo(size / 2, tipY)
+      ..lineTo(size / 2 + size * 0.09, arrowBaseY)
+      ..close();
+    canvas.drawPath(arrowPath, Paint()..color = Colors.black);
+  }
 
-  // Pin tail
-  final tailPath = Path()
-    ..moveTo(center.dx - radius * 0.45, center.dy + radius * 0.7)
-    ..lineTo(center.dx, size * 0.92)
-    ..lineTo(center.dx + radius * 0.45, center.dy + radius * 0.7)
-    ..close();
-  canvas.drawPath(tailPath, paint);
-
-  // Shadow
+  // 2) Drop shadow
   final shadowPaint = Paint()
-    ..color = color.withValues(alpha: 0.4)
+    ..color = Colors.black.withValues(alpha: 0.25)
     ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 4);
-  canvas.drawCircle(center, radius, shadowPaint);
+  canvas.drawCircle(
+      circleCenter.translate(0, 2), circleRadius, shadowPaint);
 
-  // Redraw on top of shadow
-  canvas.drawCircle(center, radius, paint);
-  canvas.drawCircle(center, radius, borderPaint);
+  // 3) Circle fill — muted for locked, light-tinted for unlocked
+  final fillColor = locked
+      ? const Color(0xFF2A2A2A)
+      : Color.lerp(Colors.white, tierColor, 0.1) ?? Colors.white;
+  canvas.drawCircle(circleCenter, circleRadius, Paint()..color = fillColor);
 
-  // Trophy icon (simple circle highlight)
-  final dotPaint = Paint()..color = Colors.white.withValues(alpha: 0.9);
-  canvas.drawCircle(center, radius * 0.3, dotPaint);
+  // 4) Tier-colored stroke
+  canvas.drawCircle(
+    circleCenter,
+    circleRadius,
+    Paint()
+      ..color = tierColor
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = size * 0.075,
+  );
+
+  // 5) Category icon in the middle
+  final iconColor = locked ? tierColor.withValues(alpha: 0.85) : tierColor;
+  final textPainter = TextPainter(
+    text: TextSpan(
+      text: String.fromCharCode(icon.codePoint),
+      style: TextStyle(
+        fontSize: circleRadius * 1.2,
+        fontFamily: icon.fontFamily,
+        package: icon.fontPackage,
+        color: iconColor,
+      ),
+    ),
+    textDirection: TextDirection.ltr,
+  );
+  textPainter.layout();
+  textPainter.paint(
+    canvas,
+    Offset(
+      circleCenter.dx - textPainter.width / 2,
+      circleCenter.dy - textPainter.height / 2,
+    ),
+  );
 
   final picture = recorder.endRecording();
   final image = await picture.toImage(size, size);
@@ -262,10 +372,17 @@ class PlatformMapViewWidget extends StatefulWidget {
 }
 
 class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
-  // Cached marker icons keyed by color ARGB32
-  final Map<int, Uint8List> _iconCache = {};
+  // Cached marker icons keyed by composite state.
+  // Key: "<argb>|<codePoint>|<locked>|<selected>"
+  final Map<String, Uint8List> _iconCache = {};
   bool _iconsReady = false;
   Cancelable? _tapCancelable;
+  bool _syncing = false;
+
+  // Previous marker set for diffing
+  Set<MapMarkerItem> _previousMarkers = {};
+  // Reverse lookup: marker ID → annotation ID (for removal)
+  final Map<String, String> _markerIdToAnnotationId = {};
 
   @override
   void initState() {
@@ -273,6 +390,7 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
     widget.controller.onStateChanged = () {
       if (mounted) _syncAnnotations();
     };
+    widget.controller._onSelectionChanged = _onSelectionChanged;
     _prepareIcons();
   }
 
@@ -283,71 +401,142 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
   }
 
   Future<void> _prepareIcons() async {
-    // Pre-render tier colors
-    final tierColors = [
-      AppColors.bronze,
-      AppColors.silver,
-      AppColors.gold,
-      AppColors.platinum,
-    ];
-    // Pre-render difficulty colors
-    final difficultyColors = [
-      AppColors.success,
-      AppColors.accent,
-      const Color(0xFFF97316),
-      const Color(0xFF9333EA),
-    ];
-    for (final color in [...tierColors, ...difficultyColors]) {
-      _iconCache[color.toARGB32()] = await _renderMarkerIcon(color);
-    }
+    // Warm-start: icon PNGs are lazily rendered on first use. We only flip
+    // the ready flag so `_syncAnnotations` can proceed.
     _iconsReady = true;
     if (mounted) _syncAnnotations();
   }
 
-  Future<Uint8List> _getIcon(Color color) async {
-    var icon = _iconCache[color.toARGB32()];
-    if (icon != null) return icon;
-    icon = await _renderMarkerIcon(color);
-    _iconCache[color.toARGB32()] = icon;
-    return icon;
+  String _cacheKey(MapMarkerItem item, bool selected) {
+    return '${item.pinColor.toARGB32()}|${item.iconData.codePoint}|'
+        '${item.isLocked ? 1 : 0}|${selected ? 1 : 0}';
+  }
+
+  Future<Uint8List> _getIcon(MapMarkerItem item, {bool selected = false}) async {
+    final key = _cacheKey(item, selected);
+    var png = _iconCache[key];
+    if (png != null) return png;
+    png = await _renderMarkerIcon(
+      tierColor: item.pinColor,
+      icon: item.iconData,
+      locked: item.isLocked,
+      selected: selected,
+    );
+    _iconCache[key] = png;
+    return png;
+  }
+
+  /// Re-render a single pin when its selection state changes. Previously
+  /// selected pin (if any) is reverted to the non-selected PNG.
+  Future<void> _onSelectionChanged(String? newId, String? previousId) async {
+    final manager = widget.controller._markerManager;
+    if (manager == null) return;
+    for (final change in [
+      if (previousId != null) (previousId, false),
+      if (newId != null) (newId, true),
+    ]) {
+      final (markerId, selected) = change;
+      final annotationId = _markerIdToAnnotationId[markerId];
+      if (annotationId == null) continue;
+      final marker = widget.controller._annotationToMarker[annotationId];
+      if (marker == null) continue;
+      final icon = await _getIcon(marker, selected: selected);
+      try {
+        await manager.update(PointAnnotation(
+          id: annotationId,
+          geometry: Point(
+              coordinates: Position(marker.longitude, marker.latitude)),
+          image: icon,
+          iconSize: 0.8,
+        ));
+      } catch (e, st) {
+        // Annotation may have been removed
+        logError(e, st, context: 'map.updateAnnotation');
+      }
+    }
   }
 
   Future<void> _syncAnnotations() async {
     final manager = widget.controller._markerManager;
     if (manager == null || !_iconsReady) return;
 
-    // Clear existing annotations
-    await manager.deleteAll();
-    widget.controller._annotationToMarker.clear();
+    // Prevent overlapping syncs
+    if (_syncing) return;
+    _syncing = true;
 
-    final ctrl = widget.controller;
-    if (ctrl.markers.isEmpty) return;
+    try {
+      final ctrl = widget.controller;
+      final newMarkers = ctrl.markers.toSet();
 
-    final options = <PointAnnotationOptions>[];
-    final markerItems = <MapMarkerItem>[];
+      // Diff: find what to remove and what to add
+      final toRemove = _previousMarkers.difference(newMarkers);
+      final toAdd = newMarkers.difference(_previousMarkers);
 
-    for (final item in ctrl.markers) {
-      final icon = await _getIcon(item.pinColor);
+      // Nothing changed — skip entirely
+      if (toRemove.isEmpty && toAdd.isEmpty) return;
 
-      options.add(PointAnnotationOptions(
-        geometry: Point(coordinates: Position(item.longitude, item.latitude)),
-        image: icon,
-        iconSize: 0.5,
-      ));
-      markerItems.add(item);
-    }
-
-    final annotations = await manager.createMulti(options);
-    for (var i = 0; i < annotations.length; i++) {
-      final annotation = annotations[i];
-      if (annotation != null) {
-        ctrl._annotationToMarker[annotation.id] = markerItems[i];
+      // Remove old annotations
+      if (toRemove.isNotEmpty) {
+        final annotationIdsToRemove = <String>[];
+        for (final item in toRemove) {
+          final annotationId = _markerIdToAnnotationId.remove(item.id);
+          if (annotationId != null) {
+            ctrl._annotationToMarker.remove(annotationId);
+            annotationIdsToRemove.add(annotationId);
+          }
+        }
+        // Delete individually by looking up the PointAnnotation objects
+        for (final annId in annotationIdsToRemove) {
+          try {
+            await manager.delete(PointAnnotation(id: annId, geometry: Point(coordinates: Position(0, 0))));
+          } catch (e, st) {
+            // Annotation may already be gone
+            logError(e, st, context: 'map.deleteAnnotation');
+          }
+        }
       }
+
+      // Add new annotations
+      if (toAdd.isNotEmpty) {
+        final options = <PointAnnotationOptions>[];
+        final addItems = <MapMarkerItem>[];
+
+        for (final item in toAdd) {
+          final selected = widget.controller._selectedMarkerId == item.id;
+          final icon = await _getIcon(item, selected: selected);
+          options.add(PointAnnotationOptions(
+            geometry: Point(coordinates: Position(item.longitude, item.latitude)),
+            image: icon,
+            iconSize: 0.8,
+          ));
+          addItems.add(item);
+        }
+
+        final annotations = await manager.createMulti(options);
+        for (var i = 0; i < annotations.length; i++) {
+          final annotation = annotations[i];
+          if (annotation != null) {
+            ctrl._annotationToMarker[annotation.id] = addItems[i];
+            _markerIdToAnnotationId[addItems[i].id] = annotation.id;
+          }
+        }
+      }
+
+      _previousMarkers = newMarkers;
+    } finally {
+      _syncing = false;
     }
   }
 
   void _onMapCreated(MapboxMap mapboxMap) async {
     widget.controller.attachMap(mapboxMap);
+
+    // Lock the map orientation — no rotation (always north-up) and no pitch.
+    await mapboxMap.gestures.updateSettings(GesturesSettings(
+      rotateEnabled: false,
+      pitchEnabled: false,
+      simultaneousRotateAndPinchToZoomEnabled: false,
+    ));
 
     // Enable user location puck
     await mapboxMap.location.updateSettings(LocationComponentSettings(

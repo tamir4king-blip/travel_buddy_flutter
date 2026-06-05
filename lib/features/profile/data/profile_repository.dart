@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:travel_buddy_mobile/shared/models/user_profile.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:path/path.dart' as path;
 
 class ProfileRepository {
@@ -30,7 +31,8 @@ class ProfileRepository {
       final publicUrl =
           _client.storage.from('photos').getPublicUrl(storagePath);
       return publicUrl;
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'profileRepository.uploadAvatar', report: true);
       return localFilePath;
     }
   }
@@ -52,8 +54,9 @@ class ProfileRepository {
         'is_public': profile.isPublic,
         'is_premium': profile.isPremium,
       });
-    } catch (_) {
-      // Silently fail — local persistence is primary
+    } catch (e, st) {
+      // Local persistence is primary
+      logError(e, st, context: 'profileRepository.syncToRemote', report: true);
     }
   }
 
@@ -81,7 +84,9 @@ class ProfileRepository {
         createdAt: DateTime.tryParse(data['created_at'] as String? ?? '') ??
             DateTime.now(),
       );
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'profileRepository.loadFromRemote',
+          report: true);
       return null;
     }
   }

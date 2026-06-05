@@ -7,7 +7,6 @@ import 'package:travel_buddy_mobile/features/achievements/presentation/screens/a
 import 'package:travel_buddy_mobile/features/quests/presentation/screens/quests_screen.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/profile_screen.dart';
 import 'package:travel_buddy_mobile/features/leaderboard/presentation/screens/leaderboard_screen.dart';
-import 'package:travel_buddy_mobile/features/map/presentation/screens/map_screen.dart';
 import 'package:travel_buddy_mobile/features/skills/presentation/screens/skills_screen.dart';
 import 'package:travel_buddy_mobile/features/activity_log/presentation/screens/activity_log_screen.dart';
 import 'package:travel_buddy_mobile/shared/widgets/app_shell.dart';
@@ -21,6 +20,10 @@ import 'package:travel_buddy_mobile/features/dev_panel/presentation/screens/achi
 import 'package:travel_buddy_mobile/features/dev_panel/presentation/screens/quest_editor_screen.dart';
 import 'package:travel_buddy_mobile/features/dev_panel/presentation/screens/data_management_screen.dart';
 import 'package:travel_buddy_mobile/features/dev_panel/presentation/screens/debug_tools_screen.dart';
+import 'package:travel_buddy_mobile/features/dev_panel/presentation/screens/polygon_editor_screen.dart';
+import 'package:travel_buddy_mobile/features/dev_panel/presentation/screens/change_history_screen.dart';
+import 'package:travel_buddy_mobile/features/skills/presentation/screens/skill_detail_screen.dart';
+import 'package:travel_buddy_mobile/features/skills/presentation/screens/activity_detail_screen.dart';
 
 final _rootNavigatorKey = GlobalKey<NavigatorState>();
 final _shellNavigatorKey = GlobalKey<NavigatorState>();
@@ -63,6 +66,19 @@ final appRouterProvider = Provider<GoRouter>((ref) {
         builder: (context, state) => const AppSettingsScreen(),
       ),
       GoRoute(
+        path: '/skills/:skillId',
+        builder: (context, state) => SkillDetailScreen(
+          skillId: state.pathParameters['skillId']!,
+        ),
+      ),
+      GoRoute(
+        path: '/skills/:skillId/activity/:activityId',
+        builder: (context, state) => ActivityDetailScreen(
+          skillId: state.pathParameters['skillId']!,
+          activityId: state.pathParameters['activityId']!,
+        ),
+      ),
+      GoRoute(
         path: '/dev-panel',
         builder: (context, state) => const DevPanelScreen(),
       ),
@@ -85,6 +101,14 @@ final appRouterProvider = Provider<GoRouter>((ref) {
       GoRoute(
         path: '/dev-panel/debug',
         builder: (context, state) => const DebugToolsScreen(),
+      ),
+      GoRoute(
+        path: '/dev-panel/polygon-editor',
+        builder: (context, state) => const PolygonEditorScreen(),
+      ),
+      GoRoute(
+        path: '/dev-panel/history',
+        builder: (context, state) => const ChangeHistoryScreen(),
       ),
       ShellRoute(
         navigatorKey: _shellNavigatorKey,
@@ -134,8 +158,11 @@ final appRouterProvider = Provider<GoRouter>((ref) {
           ),
           GoRoute(
             path: '/map',
+            // The MapScreen is mounted persistently inside AppShell so its
+            // camera/zoom/native-view state survives navigating to other tabs.
+            // The route itself only signals presence — AppShell renders the map.
             pageBuilder: (context, state) => const NoTransitionPage(
-              child: MapScreen(),
+              child: SizedBox.shrink(),
             ),
           ),
         ],

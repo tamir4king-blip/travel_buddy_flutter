@@ -1,4 +1,5 @@
 import 'package:permission_handler/permission_handler.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 
 class PermissionService {
   /// Requests foreground location permission (while using the app).
@@ -6,7 +7,8 @@ class PermissionService {
     try {
       final status = await Permission.locationWhenInUse.request();
       return status.isGranted;
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'permission.requestLocation');
       return false;
     }
   }
@@ -20,7 +22,8 @@ class PermissionService {
       if (!await Permission.locationWhenInUse.isGranted) return false;
       final status = await Permission.locationAlways.request();
       return status.isGranted;
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'permission.requestBackgroundLocation');
       return false;
     }
   }
@@ -30,7 +33,8 @@ class PermissionService {
     try {
       final status = await Permission.notification.request();
       return status.isGranted;
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'permission.requestNotification');
       return false;
     }
   }
@@ -58,7 +62,8 @@ class PermissionService {
       final location = await Permission.locationWhenInUse.isGranted;
       final notification = await Permission.notification.isGranted;
       return location && notification;
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'permission.canStartBackgroundService');
       return false;
     }
   }
@@ -70,7 +75,8 @@ class PermissionService {
       final backgroundLocation = await Permission.locationAlways.isGranted;
       final notification = await Permission.notification.isGranted;
       return location && backgroundLocation && notification;
-    } catch (_) {
+    } catch (e, st) {
+      logError(e, st, context: 'permission.hasAllPermissions');
       return false;
     }
   }

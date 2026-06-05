@@ -132,6 +132,9 @@ class AppLocalizationsHe extends AppLocalizations {
   String get totalXp => 'סה\"כ XP';
 
   @override
+  String get totalSkillLevel => 'רמת מיומנות';
+
+  @override
   String get level => 'רמה';
 
   @override

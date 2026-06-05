@@ -10,6 +10,7 @@ class Achievement {
   final double? latitude;
   final double? longitude;
   final double? claimRadius;
+  final List<List<double>>? claimPolygon; // [[lat, lng], ...] — takes priority over radius
   final String? collectionId;
   final List<String> tags;
   final bool isUnlocked;
@@ -22,6 +23,17 @@ class Achievement {
   // Pending claim: detected nearby but not yet claimed by user
   final bool isPendingClaim;
   final DateTime? pendingClaimAt;
+  // Revisit tracking
+  final int visitCount;
+  final DateTime? lastVisitedAt;
+  // Pending revisit: detected nearby an already-unlocked achievement
+  final bool isPendingRevisit;
+  // History of revisit timestamps (for timeline display)
+  final List<DateTime> revisitHistory;
+
+  bool get hasPolygon => claimPolygon != null && claimPolygon!.length >= 3;
+  bool get hasGeofence =>
+      hasPolygon || (latitude != null && longitude != null && claimRadius != null);
 
   const Achievement({
     required this.id,
@@ -33,6 +45,7 @@ class Achievement {
     this.latitude,
     this.longitude,
     this.claimRadius,
+    this.claimPolygon,
     this.collectionId,
     this.tags = const [],
     this.isUnlocked = false,
@@ -43,6 +56,10 @@ class Achievement {
     this.isRetroactive = false,
     this.isPendingClaim = false,
     this.pendingClaimAt,
+    this.visitCount = 0,
+    this.lastVisitedAt,
+    this.isPendingRevisit = false,
+    this.revisitHistory = const [],
   });
 
   Achievement copyWith({
@@ -53,9 +70,15 @@ class Achievement {
     String? notes,
     bool? isRetroactive,
     double? claimRadius,
+    List<List<double>>? claimPolygon,
+    bool clearClaimPolygon = false,
     bool? isPendingClaim,
     DateTime? pendingClaimAt,
     bool clearPendingClaimAt = false,
+    int? visitCount,
+    DateTime? lastVisitedAt,
+    bool? isPendingRevisit,
+    List<DateTime>? revisitHistory,
   }) {
     return Achievement(
       id: id,
@@ -67,6 +90,7 @@ class Achievement {
       latitude: latitude,
       longitude: longitude,
       claimRadius: claimRadius ?? this.claimRadius,
+      claimPolygon: clearClaimPolygon ? null : (claimPolygon ?? this.claimPolygon),
       collectionId: collectionId,
       tags: tags,
       isUnlocked: isUnlocked ?? this.isUnlocked,
@@ -79,6 +103,10 @@ class Achievement {
       pendingClaimAt: clearPendingClaimAt
           ? null
           : (pendingClaimAt ?? this.pendingClaimAt),
+      visitCount: visitCount ?? this.visitCount,
+      lastVisitedAt: lastVisitedAt ?? this.lastVisitedAt,
+      isPendingRevisit: isPendingRevisit ?? this.isPendingRevisit,
+      revisitHistory: revisitHistory ?? this.revisitHistory,
     );
   }
 
@@ -93,6 +121,10 @@ class Achievement {
       'isRetroactive': isRetroactive,
       'isPendingClaim': isPendingClaim,
       'pendingClaimAt': pendingClaimAt?.toIso8601String(),
+      'visitCount': visitCount,
+      'lastVisitedAt': lastVisitedAt?.toIso8601String(),
+      'isPendingRevisit': isPendingRevisit,
+      'revisitHistory': revisitHistory.map((d) => d.toIso8601String()).toList(),
     };
   }
 
@@ -112,6 +144,15 @@ class Achievement {
       pendingClaimAt: json['pendingClaimAt'] != null
           ? DateTime.parse(json['pendingClaimAt'] as String)
           : null,
+      visitCount: json['visitCount'] as int? ?? 0,
+      lastVisitedAt: json['lastVisitedAt'] != null
+          ? DateTime.parse(json['lastVisitedAt'] as String)
+          : null,
+      isPendingRevisit: json['isPendingRevisit'] as bool? ?? false,
+      revisitHistory: (json['revisitHistory'] as List<dynamic>?)
+              ?.map((d) => DateTime.parse(d as String))
+              .toList() ??
+          const [],
     );
   }
 

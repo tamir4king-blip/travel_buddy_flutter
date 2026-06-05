@@ -237,14 +237,13 @@ class _ProfileScreenState extends ConsumerState<ProfileScreen>
                   _SettingsTile(icon: LucideIcons.mapPin, label: l10n.locationSettings, onTap: () => context.push('/profile/settings')),
                 ],
               ),
-              // Dev Panel (admin only)
-              if (kDebugMode &&
-                  ref.watch(authProvider).user?.id != null &&
-                  SupabaseConfig.isConfigured &&
-                  sb.Supabase.instance.client.auth.currentUser?.email == 'tamir4king@gmail.com') ...[
+              // Dev Panel (admin only — tamir4king@gmail.com)
+              if (SupabaseConfig.isConfigured &&
+                  sb.Supabase.instance.client.auth.currentUser?.email ==
+                      'tamir4king@gmail.com') ...[
                 const SizedBox(height: 20),
                 _SettingsSection(
-                  title: 'Developer',
+                  title: 'Admin',
                   items: [
                     _SettingsTile(
                       icon: LucideIcons.code,

@@ -20,6 +20,7 @@ class PersistenceService {
   static const _keyLiveTracking = 'live_tracking';
   static const _keyNotifications = 'notifications_enabled';
   static const _keyPendingClaims = 'pending_claims';
+  static const _keyAchievementDefinitions = 'achievement_definitions';
 
   // --- User Profile ---
 
@@ -172,6 +173,28 @@ class PersistenceService {
     return map.map((k, v) => MapEntry(k, v as String));
   }
 
+  // --- Achievement Definitions (Supabase cache) ---
+
+  Future<void> saveAchievementDefinitions(String json) async {
+    await _prefs.setString(_keyAchievementDefinitions, json);
+  }
+
+  String? loadAchievementDefinitions() {
+    return _prefs.getString(_keyAchievementDefinitions);
+  }
+
+  // --- Quest Chains ---
+
+  static const _keyQuestChains = 'quest_chains';
+
+  Future<void> saveQuestChains(String jsonString) async {
+    await _prefs.setString(_keyQuestChains, jsonString);
+  }
+
+  String? loadQuestChains() {
+    return _prefs.getString(_keyQuestChains);
+  }
+
   // --- Reload from disk ---
 
   /// Re-reads SharedPreferences from disk. Call this when the app resumes
@@ -195,5 +218,6 @@ class PersistenceService {
     await _prefs.remove(_keyLiveTracking);
     await _prefs.remove(_keyNotifications);
     await _prefs.remove(_keyPendingClaims);
+    await _prefs.remove(_keyQuestChains);
   }
 }

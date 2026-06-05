@@ -41,3 +41,8 @@ final cachedCameraStateProvider = StateProvider<CachedCameraState?>((ref) => nul
 /// Tracks whether the map is in immersive full-screen mode.
 /// AppShell watches this to hide/show the nav bar.
 final mapImmersiveProvider = StateProvider<bool>((ref) => false);
+
+/// Whether the zone settings popover (mode toggle + per-mode controls) is
+/// expanded. Lifted to a provider so the popover can be rendered as an
+/// overlay on the map area while the trigger lives in the top bar banner.
+final mapZoneSettingsOpenProvider = StateProvider<bool>((ref) => false);

@@ -1,4 +1,5 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:travel_buddy_mobile/shared/models/user_profile.dart';
 import 'package:travel_buddy_mobile/shared/providers/auth_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/persistence_provider.dart';
@@ -28,20 +29,23 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
       final remote = await syncService.loadProfileFromRemote();
       if (remote == null) return;
 
-      // Merge: remote wins for text fields, higher value wins for XP/level
+      // Merge: remote wins for text fields, higher value wins for XP/level.
+      // This ensures data is restored correctly after a reinstall (when
+      // local XP/level start at 0).
       state = state.copyWith(
         displayName: remote.displayName,
         username: remote.username,
         bio: remote.bio,
         avatarUrl: remote.avatarUrl,
-        totalXp: remote.totalXp > state.totalXp ? remote.totalXp : null,
-        level: remote.level > state.level ? remote.level : null,
+        totalXp: remote.totalXp >= state.totalXp ? remote.totalXp : null,
+        level: remote.level >= state.level ? remote.level : null,
         isPublic: remote.isPublic,
         isPremium: remote.isPremium,
       );
       _persistLocally();
-    } catch (_) {
-      // Silently fail — local persistence is primary
+    } catch (e, st) {
+      // Local persistence is primary
+      logError(e, st, context: 'userProfile.syncFromRemote', report: true);
     }
   }
 
@@ -61,8 +65,8 @@ class UserProfileNotifier extends StateNotifier<UserProfile> {
       if (syncService == null) return;
       // Fire-and-forget
       syncService.syncProfileToRemote(state);
-    } catch (_) {
-      // Silently fail
+    } catch (e, st) {
+      logError(e, st, context: 'userProfile.syncToRemote', report: true);
     }
   }
 

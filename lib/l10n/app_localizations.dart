@@ -320,6 +320,12 @@ abstract class AppLocalizations {
   /// **'Total XP'**
   String get totalXp;
 
+  /// No description provided for @totalSkillLevel.
+  ///
+  /// In en, this message translates to:
+  /// **'Skill Level'**
+  String get totalSkillLevel;
+
   /// No description provided for @level.
   ///
   /// In en, this message translates to:

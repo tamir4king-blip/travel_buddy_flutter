@@ -1,12 +1,19 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
-import 'package:geolocator/geolocator.dart';
+import 'package:travel_buddy_mobile/shared/utils/geo_utils.dart';
 import 'package:travel_buddy_mobile/core/config/supabase_config.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:travel_buddy_mobile/shared/models/achievement.dart';
+import 'package:travel_buddy_mobile/shared/providers/auth_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/user_profile_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/persistence_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/supabase_provider.dart';
 import 'package:travel_buddy_mobile/shared/data/travel_achievement_registry.dart';
+import 'package:travel_buddy_mobile/shared/data/lakes_achievement_registry.dart';
+import 'package:travel_buddy_mobile/shared/data/glaciers_achievement_registry.dart';
+import 'package:travel_buddy_mobile/shared/data/deserts_achievement_registry.dart';
+import 'package:travel_buddy_mobile/shared/data/local_achievement_registry.dart';
 import 'package:travel_buddy_mobile/shared/data/collection_registry.dart';
+import 'package:travel_buddy_mobile/shared/providers/achievement_definitions_provider.dart';
 
 /// Data class for retroactive achievement claims
 class RetroactiveClaimData {
@@ -88,6 +95,67 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     _loadAchievements();
     // Sync from Supabase in background after local load
     _syncFromRemote();
+
+    // Re-sync when auth state changes (e.g. after login on a fresh install).
+    // Without this, _syncFromRemote() silently returns if the user isn't
+    // authenticated yet when the provider is first created.
+    ref.listen(authProvider, (prev, next) {
+      if (next.isAuthenticated && !(prev?.isAuthenticated ?? false)) {
+        _syncFromRemote();
+      }
+    });
+
+    // React to achievement definition updates (e.g. when Supabase fetch
+    // completes and new polygons/radii arrive). Rebuild state using the new
+    // definitions while preserving per-user unlock + revisit state.
+    ref.listen<List<Achievement>>(achievementDefinitionsProvider,
+        (prev, next) {
+      if (identical(prev, next)) return;
+      _rebuildWithDefinitions(next);
+    });
+  }
+
+  /// Swap in new definitions (polygons, radii, titles from Supabase) while
+  /// keeping the current per-user state (unlocked, visitCount, etc.).
+  void _rebuildWithDefinitions(List<Achievement> newDefinitions) {
+    final savedById = {for (final a in state.allAchievements) a.id: a};
+
+    final rebuilt = newDefinitions.map((def) {
+      final saved = savedById[def.id];
+      if (saved == null) return def;
+      return Achievement(
+        id: def.id,
+        title: def.title,
+        description: def.description,
+        iconName: def.iconName,
+        tier: def.tier,
+        xpReward: def.xpReward,
+        latitude: def.latitude,
+        longitude: def.longitude,
+        claimRadius: def.claimRadius,
+        claimPolygon: def.claimPolygon,
+        collectionId: def.collectionId,
+        tags: def.tags,
+        // Preserve user state
+        isUnlocked: saved.isUnlocked,
+        unlockedAt: saved.unlockedAt,
+        visitDate: saved.visitDate,
+        photos: saved.photos,
+        notes: saved.notes,
+        isRetroactive: saved.isRetroactive,
+        isPendingClaim: saved.isPendingClaim,
+        pendingClaimAt: saved.pendingClaimAt,
+        visitCount: saved.visitCount,
+        lastVisitedAt: saved.lastVisitedAt,
+        isPendingRevisit: saved.isPendingRevisit,
+        revisitHistory: saved.revisitHistory,
+      );
+    }).toList();
+
+    state = state.copyWith(
+      allAchievements: rebuilt,
+      unlockedAchievements: rebuilt.where((a) => a.isUnlocked).toList(),
+    );
   }
 
   void _loadAchievements() {
@@ -97,6 +165,9 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       final savedCollections = persistence.loadCompletedCollections();
       final pendingClaims = persistence.loadPendingClaims();
 
+      // Use definitions provider (merges Supabase + hardcoded)
+      final registry = ref.read(achievementDefinitionsProvider);
+
       // Build a map of saved data by id
       final savedMap = <String, Map<String, dynamic>>{};
       for (final json in savedAchievements) {
@@ -105,7 +176,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       }
 
       // Merge saved state onto registry
-      final merged = achievementRegistry.map((a) {
+      final merged = registry.map((a) {
         var achievement = a;
         final saved = savedMap[a.id];
         if (saved != null) {
@@ -127,8 +198,9 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
         unlockedAchievements: merged.where((a) => a.isUnlocked).toList(),
         completedCollections: savedCollections,
       );
-    } catch (_) {
+    } catch (e, st) {
       // If persistence data is corrupted, load fresh from registry
+      logError(e, st, context: 'achievements.loadFromStorage', report: true);
       state = AchievementsState(
         allAchievements: achievementRegistry,
         unlockedAchievements: const [],
@@ -173,39 +245,89 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       for (var i = 0; i < updatedAll.length; i++) {
         final a = updatedAll[i];
         final remote = remoteMap[a.id];
-        if (remote != null && !a.isUnlocked) {
-          // Remote says unlocked but local doesn't — restore it
+        if (remote == null) continue;
+
+        // Parse remote revisit fields
+        final remoteVisitCount = remote['visit_count'] as int? ?? 0;
+        final remoteLastVisitedAt = remote['last_visited_at'] != null
+            ? DateTime.tryParse(remote['last_visited_at'] as String)
+            : null;
+        final remoteRevisitHistory =
+            (remote['revisit_history'] as List<dynamic>?)
+                    ?.map((d) => DateTime.parse(d as String))
+                    .toList() ??
+                const <DateTime>[];
+
+        if (!a.isUnlocked) {
+          // Remote says unlocked but local doesn't — restore full state
           updatedAll[i] = a.copyWith(
             isUnlocked: true,
-            unlockedAt: DateTime.tryParse(remote['unlocked_at'] as String? ?? ''),
+            unlockedAt:
+                DateTime.tryParse(remote['unlocked_at'] as String? ?? ''),
             visitDate: remote['visit_date'] != null
                 ? DateTime.tryParse(remote['visit_date'] as String)
                 : null,
             notes: remote['notes'] as String?,
             isRetroactive: remote['is_retroactive'] as bool? ?? false,
-            photos: (remote['photos'] as List<dynamic>?)?.cast<String>() ?? const [],
+            photos: (remote['photos'] as List<dynamic>?)?.cast<String>() ??
+                const [],
+            visitCount: remoteVisitCount,
+            lastVisitedAt: remoteLastVisitedAt,
+            revisitHistory: remoteRevisitHistory,
           );
           updatedUnlocked.add(updatedAll[i]);
           changed = true;
+        } else {
+          // Already unlocked locally — merge revisit data (CRDT-style)
+          final mergedCount =
+              remoteVisitCount > a.visitCount ? remoteVisitCount : a.visitCount;
+          final mergedLastVisited = _latestDate(a.lastVisitedAt, remoteLastVisitedAt);
+          final mergedHistory = _unionTimestamps(a.revisitHistory, remoteRevisitHistory);
+
+          if (mergedCount != a.visitCount ||
+              mergedLastVisited != a.lastVisitedAt ||
+              mergedHistory.length != a.revisitHistory.length) {
+            updatedAll[i] = a.copyWith(
+              visitCount: mergedCount,
+              lastVisitedAt: mergedLastVisited,
+              revisitHistory: mergedHistory,
+            );
+            final unlockedIdx =
+                updatedUnlocked.indexWhere((u) => u.id == a.id);
+            if (unlockedIdx != -1) updatedUnlocked[unlockedIdx] = updatedAll[i];
+            changed = true;
+          }
         }
       }
 
-      if (changed) {
-        // Recompute completed collections by checking all distinct collection IDs
-        final completedCollections = <String>{...state.completedCollections};
-        final allCollectionIds = updatedAll
-            .map((a) => a.collectionId)
-            .whereType<String>()
-            .toSet();
-        for (final collectionId in allCollectionIds) {
-          if (!completedCollections.contains(collectionId)) {
-            final all = updatedAll.where((a) => a.collectionId == collectionId);
-            if (all.isNotEmpty && all.every((a) => a.isUnlocked)) {
-              completedCollections.add(collectionId);
-            }
+      // Also fetch completed collections from remote
+      final collectionRows = await client
+          .from('user_completed_collections')
+          .select('collection_id')
+          .eq('user_id', userId);
+      final remoteCollections = collectionRows
+          .map((r) => r['collection_id'] as String)
+          .toSet();
+
+      // Recompute completed collections by checking all distinct collection IDs
+      final completedCollections = <String>{
+        ...state.completedCollections,
+        ...remoteCollections,
+      };
+      final allCollectionIds = updatedAll
+          .map((a) => a.collectionId)
+          .whereType<String>()
+          .toSet();
+      for (final collectionId in allCollectionIds) {
+        if (!completedCollections.contains(collectionId)) {
+          final all = updatedAll.where((a) => a.collectionId == collectionId);
+          if (all.isNotEmpty && all.every((a) => a.isUnlocked)) {
+            completedCollections.add(collectionId);
           }
         }
+      }
 
+      if (changed || completedCollections.length > state.completedCollections.length) {
         state = state.copyWith(
           allAchievements: updatedAll,
           unlockedAchievements: updatedUnlocked,
@@ -214,10 +336,15 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
         await _persistLocally();
       }
 
-      // Push any locally-unlocked achievements that aren't in remote
-      _syncMissingToRemote(remoteMap);
-    } catch (_) {
-      // Silently fail — local data is primary
+      // Push local state back to remote. After the CRDT merge above, local
+      // holds the winning value for each field. Pushing everything ensures:
+      //   - unlocks made offline are synced up
+      //   - revisit counts/history made offline are synced up
+      //   - remote stays authoritative for cross-device restore
+      _syncAllToRemote();
+    } catch (e, st) {
+      // Local data is primary, retry on next sync
+      logError(e, st, context: 'achievements.syncWithRemote', report: true);
     }
   }
 
@@ -225,15 +352,6 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
   Future<void> _syncAllToRemote() async {
     for (final a in state.unlockedAchievements) {
       await _upsertAchievementToRemote(a);
-    }
-  }
-
-  /// Push locally-unlocked achievements missing from remote.
-  Future<void> _syncMissingToRemote(Map<String, Map<String, dynamic>> remoteMap) async {
-    for (final a in state.unlockedAchievements) {
-      if (!remoteMap.containsKey(a.id)) {
-        await _upsertAchievementToRemote(a);
-      }
     }
   }
 
@@ -245,6 +363,10 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       final userId = client.auth.currentUser?.id;
       if (userId == null) return;
 
+      // NOTE: visit_count, last_visited_at, revisit_history are owned by
+      // the `register_revisit` RPC — never written via plain upsert to
+      // prevent modded clients from overwriting server state. The column
+      // defaults handle the initial unlock row (visit_count = 1, others NULL).
       await client.from('user_achievements').upsert({
         'user_id': userId,
         'achievement_id': a.id,
@@ -254,8 +376,9 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
         'is_retroactive': a.isRetroactive,
         'photos': a.photos,
       }, onConflict: 'user_id,achievement_id');
-    } catch (_) {
-      // Silently fail — will retry on next sync
+    } catch (e, st) {
+      // Will retry on next sync
+      logError(e, st, context: 'achievements.upsertToRemote', report: true);
     }
   }
 
@@ -278,11 +401,32 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
   }
 
   /// Persists locally and optionally syncs a specific achievement to Supabase.
-  Future<void> _persist({Achievement? syncToRemote}) async {
+  Future<void> _persist({Achievement? syncToRemote, String? newlyCompletedCollection}) async {
     await _persistLocally();
 
     if (syncToRemote != null && syncToRemote.isUnlocked) {
       _upsertAchievementToRemote(syncToRemote);
+    }
+    if (newlyCompletedCollection != null) {
+      _upsertCompletedCollectionToRemote(newlyCompletedCollection);
+    }
+  }
+
+  /// Upsert a completed collection to the user_completed_collections table.
+  Future<void> _upsertCompletedCollectionToRemote(String collectionId) async {
+    if (!SupabaseConfig.isConfigured) return;
+    try {
+      final client = ref.read(supabaseClientProvider);
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) return;
+
+      await client.from('user_completed_collections').upsert({
+        'user_id': userId,
+        'collection_id': collectionId,
+      }, onConflict: 'user_id,collection_id');
+    } catch (e, st) {
+      logError(e, st,
+          context: 'achievements.upsertCompletedCollection', report: true);
     }
   }
 
@@ -318,11 +462,14 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     final achievement = state.allAchievements[index];
     if (achievement.isUnlocked) return false;
 
+    final now = DateTime.now();
     final unlocked = achievement.copyWith(
       isUnlocked: true,
-      unlockedAt: DateTime.now(),
+      unlockedAt: now,
       isPendingClaim: false,
       clearPendingClaimAt: true,
+      visitCount: 1,
+      lastVisitedAt: now,
     );
 
     final updatedAll = [...state.allAchievements];
@@ -361,24 +508,36 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       }
     }
 
-    await _persist(syncToRemote: unlocked);
+    await _persist(syncToRemote: unlocked, newlyCompletedCollection: newlyCompletedCollection);
     return true;
   }
 
-  /// Reload pending claims from SharedPreferences (e.g. after the background
-  /// service has written new entries while the app was suspended).
+  /// Reload pending claims AND revisit updates from SharedPreferences
+  /// (e.g. after the background service has written new entries while the
+  /// app was suspended). Merges higher visit counts, latest lastVisitedAt,
+  /// and any new revisit history entries back into state, then syncs to
+  /// Supabase so the server matches.
   Future<void> refreshFromStorage() async {
     final persistence = ref.read(persistenceServiceProvider);
     await persistence.reload();
 
     final pendingClaims = persistence.loadPendingClaims();
-    if (pendingClaims.isEmpty) return;
+    final savedUnlocked = persistence.loadUnlockedAchievements();
+    final savedMap = <String, Map<String, dynamic>>{};
+    for (final json in savedUnlocked) {
+      final id = json['id'] as String?;
+      if (id != null) savedMap[id] = json;
+    }
 
     var changed = false;
     final updatedAll = [...state.allAchievements];
+    final updatedUnlocked = [...state.unlockedAchievements];
+    final achievementsToSync = <Achievement>[];
 
     for (var i = 0; i < updatedAll.length; i++) {
       final a = updatedAll[i];
+
+      // 1) Pending claim from background
       final pendingAt = pendingClaims[a.id];
       if (pendingAt != null && !a.isUnlocked && !a.isPendingClaim) {
         updatedAll[i] = a.copyWith(
@@ -387,10 +546,113 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
         );
         changed = true;
       }
+
+      // 2) Revisit data from background — merge if storage has newer values
+      if (a.isUnlocked) {
+        final saved = savedMap[a.id];
+        if (saved == null) continue;
+
+        final savedCount = saved['visitCount'] as int? ?? 0;
+        final savedLastVisited = saved['lastVisitedAt'] != null
+            ? DateTime.tryParse(saved['lastVisitedAt'] as String)
+            : null;
+        final savedHistory = (saved['revisitHistory'] as List<dynamic>?)
+                ?.map((d) => DateTime.parse(d as String))
+                .toList() ??
+            const <DateTime>[];
+        final savedPendingRevisit = saved['isPendingRevisit'] as bool? ?? false;
+
+        final needsUpdate = savedCount > a.visitCount ||
+            (savedLastVisited != null &&
+                (a.lastVisitedAt == null ||
+                    savedLastVisited.isAfter(a.lastVisitedAt!))) ||
+            savedHistory.length > a.revisitHistory.length ||
+            (savedPendingRevisit && !a.isPendingRevisit);
+
+        if (needsUpdate) {
+          final merged = updatedAll[i].copyWith(
+            visitCount:
+                savedCount > updatedAll[i].visitCount ? savedCount : null,
+            lastVisitedAt: savedLastVisited != null &&
+                    (updatedAll[i].lastVisitedAt == null ||
+                        savedLastVisited.isAfter(updatedAll[i].lastVisitedAt!))
+                ? savedLastVisited
+                : null,
+            revisitHistory: savedHistory.length > updatedAll[i].revisitHistory.length
+                ? savedHistory
+                : null,
+            isPendingRevisit: savedPendingRevisit ? true : null,
+          );
+          updatedAll[i] = merged;
+          final ui =
+              updatedUnlocked.indexWhere((u) => u.id == a.id);
+          if (ui != -1) updatedUnlocked[ui] = merged;
+          achievementsToSync.add(merged);
+          changed = true;
+        }
+      }
     }
 
-    if (changed) {
-      state = state.copyWith(allAchievements: updatedAll);
+    if (!changed) return;
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements: updatedUnlocked,
+    );
+    // Persist the merged state locally so we don't drift from background
+    await _persistLocally();
+
+    // Validate each background-recorded revisit via the server-authoritative
+    // RPC. The server will accept or reject based on its own cooldown logic,
+    // preventing modded clients / direct SharedPreferences edits from
+    // inflating counts. We call the RPC once per achievement — if the user
+    // triggered multiple revisits while offline, only one will be accepted
+    // per cooldown window (which is the correct behavior).
+    for (final a in achievementsToSync) {
+      _validateBackgroundRevisit(a.id);
+    }
+  }
+
+  /// Ask the server whether a background-recorded revisit was legitimate.
+  /// If rejected, reconcile local values to match server authority.
+  Future<void> _validateBackgroundRevisit(String achievementId) async {
+    if (!SupabaseConfig.isConfigured) return;
+    try {
+      final client = ref.read(supabaseClientProvider);
+      if (client.auth.currentUser?.id == null) return;
+
+      final response = await client.rpc(
+        'register_revisit',
+        params: {'ach_id': achievementId},
+      );
+      if (response is! Map) return;
+
+      final serverCount = (response['visit_count'] as num?)?.toInt();
+      final serverLastVisited = response['last_visited_at'] != null
+          ? DateTime.tryParse(response['last_visited_at'] as String)
+          : null;
+      final serverHistory = (response['revisit_history'] as List<dynamic>?)
+          ?.map((d) => DateTime.parse(d as String))
+          .toList();
+
+      // Reconcile local state to match server values (works for both accept
+      // and reject cases — server is the source of truth).
+      final idx =
+          state.allAchievements.indexWhere((x) => x.id == achievementId);
+      if (idx == -1) return;
+      final current = state.allAchievements[idx];
+      if (serverCount == null) return;
+
+      final reconciled = current.copyWith(
+        visitCount: serverCount,
+        lastVisitedAt: serverLastVisited,
+        revisitHistory: serverHistory ?? current.revisitHistory,
+      );
+      _commitAchievement(idx, reconciled);
+      await _persistLocally();
+    } catch (e, st) {
+      // Network error — local stays as optimistic. Retries on next resume.
+      logError(e, st, context: 'achievements.reconcileRevisit', report: true);
     }
   }
 
@@ -431,15 +693,10 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     // Location-gated validation for achievements with coordinates
     // Skip for retroactive claims (they have date-based validation)
     if (!isRetroactive &&
-        achievement.latitude != null &&
-        achievement.longitude != null &&
-        achievement.claimRadius != null &&
+        achievement.hasGeofence &&
         userLat != null &&
         userLng != null) {
-      final distance = Geolocator.distanceBetween(
-        userLat, userLng, achievement.latitude!, achievement.longitude!,
-      );
-      if (distance > achievement.claimRadius!) return false;
+      if (!isWithinClaimArea(userLat, userLng, achievement)) return false;
     }
 
     final claimDate = DateTime.now();
@@ -451,6 +708,8 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       photos: isRetroactive ? retroactiveData.photos : const [],
       notes: isRetroactive ? retroactiveData.notes : null,
       isRetroactive: isRetroactive,
+      visitCount: 1,
+      lastVisitedAt: claimDate,
     );
 
     final updatedAll = [...state.allAchievements];
@@ -491,7 +750,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       }
     }
 
-    await _persist(syncToRemote: unlocked);
+    await _persist(syncToRemote: unlocked, newlyCompletedCollection: newlyCompletedCollection);
     return true;
   }
 
@@ -502,6 +761,281 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
   /// Call after showing the celebration dialog to clear.
   void clearLastCompletedCollection() {
     _lastCompletedCollection = null;
+  }
+
+  /// Default revisit cooldown — 1 hour between repeat claims.
+  static const revisitCooldown = Duration(hours: 1);
+
+  /// Extended cooldown for continent and country achievements — 1 week.
+  static const extendedRevisitCooldown = Duration(days: 7);
+
+  /// Collection IDs that require the extended 1-week revisit cooldown
+  /// (continent-type and country-type achievements).
+  static const _extendedCooldownCollections = {
+    'continents',      // continent-level
+    'europe',          // European countries
+    'americas',        // American destinations
+    'africa',          // African countries
+    'asia',            // Asian countries
+    'south-america',   // South American countries
+    'oceania',         // Oceania countries
+    'capitals',        // World capitals (country-level)
+  };
+
+  /// Returns the revisit cooldown for a given achievement based on its type.
+  static Duration cooldownFor(Achievement achievement) {
+    if (achievement.collectionId != null &&
+        _extendedCooldownCollections.contains(achievement.collectionId)) {
+      return extendedRevisitCooldown;
+    }
+    return revisitCooldown;
+  }
+
+  /// Record a revisit for an already-unlocked achievement.
+  /// Goes through the `register_revisit` Supabase RPC so the cooldown is
+  /// enforced server-side (prevents modded clients from farming revisits).
+  ///
+  /// Flow:
+  ///   1. Local sanity check — skip if already pending or within client-side
+  ///      cooldown window (fast path, avoids unnecessary RPC calls).
+  ///   2. Call RPC. Server checks its own `last_visited_at` and the
+  ///      achievement's collection type to decide.
+  ///   3. Accepted → reconcile local state with server's visit_count + history.
+  ///   4. Rejected (cooldown or unknown) → reconcile without incrementing.
+  ///   5. Network error → mark optimistic update locally; next sync replays.
+  ///
+  /// Returns true if the server accepted the revisit (or, when offline, if
+  /// the local optimistic update was applied).
+  Future<bool> recordRevisit(String achievementId) async {
+    final index =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (index == -1) return false;
+
+    final achievement = state.allAchievements[index];
+    if (!achievement.isUnlocked) return false;
+    // Already pending acknowledgment — don't log again
+    if (achievement.isPendingRevisit) return false;
+
+    // Client-side cooldown — purely an optimistic UX hint. Server is the
+    // source of truth; a modded client that bypasses this still gets rejected
+    // by the RPC.
+    final now = DateTime.now();
+    final cooldown = cooldownFor(achievement);
+    final anchor = achievement.lastVisitedAt ?? achievement.unlockedAt;
+    if (anchor != null && now.difference(anchor) < cooldown) {
+      return false;
+    }
+
+    // Server-authoritative call — but we don't optimistically update state
+    // first, because if the server rejects, we'd have to roll back. Instead,
+    // update state only after we hear back (or on offline fallback).
+    if (SupabaseConfig.isConfigured) {
+      try {
+        final client = ref.read(supabaseClientProvider);
+        final userId = client.auth.currentUser?.id;
+        if (userId != null) {
+          final response = await client.rpc(
+            'register_revisit',
+            params: {'ach_id': achievementId},
+          );
+
+          if (response is Map) {
+            final accepted = response['accepted'] as bool? ?? false;
+            final serverCount = (response['visit_count'] as num?)?.toInt();
+            final serverLastVisited = response['last_visited_at'] != null
+                ? DateTime.tryParse(response['last_visited_at'] as String)
+                : null;
+            final serverHistory =
+                (response['revisit_history'] as List<dynamic>?)
+                        ?.map((d) => DateTime.parse(d as String))
+                        .toList() ??
+                    achievement.revisitHistory;
+
+            if (accepted) {
+              final updated = achievement.copyWith(
+                visitCount: serverCount ?? achievement.visitCount + 1,
+                lastVisitedAt: serverLastVisited ?? now,
+                revisitHistory: serverHistory,
+                isPendingRevisit: true,
+              );
+              _commitAchievement(index, updated);
+              await _persistLocally();
+              return true;
+            } else {
+              // Server rejected — reconcile local with server values but
+              // don't mark as pending revisit. This also corrects any drift
+              // if the client had stale local counts.
+              if (serverCount != null || serverLastVisited != null) {
+                final reconciled = achievement.copyWith(
+                  visitCount: serverCount ?? achievement.visitCount,
+                  lastVisitedAt: serverLastVisited ?? achievement.lastVisitedAt,
+                  revisitHistory: serverHistory,
+                );
+                _commitAchievement(index, reconciled);
+                await _persistLocally();
+              }
+              return false;
+            }
+          }
+        }
+      } catch (e, st) {
+        // Fall through to offline optimistic path
+        logError(e, st, context: 'achievements.registerRevisitRpc',
+            report: true);
+      }
+    }
+
+    // Offline / RPC unavailable — optimistic local update. The next time the
+    // app is online, _syncFromRemote will re-pull authoritative values and
+    // correct any drift. recordRevisit will also be re-attempted via
+    // nearby_achievements_provider on the next GPS update.
+    final optimistic = achievement.copyWith(
+      visitCount: achievement.visitCount + 1,
+      lastVisitedAt: now,
+      isPendingRevisit: true,
+      revisitHistory: [...achievement.revisitHistory, now],
+    );
+    _commitAchievement(index, optimistic);
+    await _persistLocally();
+    return true;
+  }
+
+  /// Helper: replace the achievement at [index] in both allAchievements and
+  /// unlockedAchievements, then push the new state.
+  void _commitAchievement(int index, Achievement updated) {
+    final updatedAll = [...state.allAchievements];
+    updatedAll[index] = updated;
+
+    final unlockedIdx =
+        state.unlockedAchievements.indexWhere((u) => u.id == updated.id);
+    final updatedUnlocked = [...state.unlockedAchievements];
+    if (unlockedIdx != -1) updatedUnlocked[unlockedIdx] = updated;
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements: updatedUnlocked,
+    );
+  }
+
+  /// Add a retroactive revisit — appends [visitedAt] to the history and
+  /// increments the visit count. Unlike `recordRevisit`, this skips the RPC
+  /// cooldown (user is admitting a past visit, not claiming a current one).
+  /// Local-only for now; server sync for retroactive history is not yet wired.
+  Future<bool> addRetroactiveRevisit(String achievementId, DateTime visitedAt) async {
+    final index =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (index == -1) return false;
+    final a = state.allAchievements[index];
+    if (!a.isUnlocked) return false;
+
+    final newHistory = [...a.revisitHistory, visitedAt]..sort();
+    final updated = a.copyWith(
+      visitCount: a.visitCount + 1,
+      revisitHistory: newHistory,
+    );
+    _commitAchievement(index, updated);
+    await _persistLocally();
+    return true;
+  }
+
+  /// Update a specific entry in the revisit history — used by the edit
+  /// icon on each visit row in the UI. Local-only like addRetroactiveRevisit.
+  Future<void> updateRevisitEntry(
+      String achievementId, int index, DateTime newDate) async {
+    final ai =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (ai == -1) return;
+    final a = state.allAchievements[ai];
+    if (!a.isUnlocked) return;
+    if (index < 0 || index >= a.revisitHistory.length) return;
+
+    final newHistory = [...a.revisitHistory];
+    newHistory[index] = newDate;
+    newHistory.sort();
+
+    final updated = a.copyWith(revisitHistory: newHistory);
+    _commitAchievement(ai, updated);
+    await _persistLocally();
+  }
+
+  /// Append a photo URL to an already-unlocked achievement.
+  Future<void> addPhoto(String achievementId, String photoUrl) async {
+    final index =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (index == -1) return;
+    final a = state.allAchievements[index];
+    if (!a.isUnlocked) return;
+
+    final updated = a.copyWith(photos: [...a.photos, photoUrl]);
+    _commitAchievement(index, updated);
+    await _persist(syncToRemote: updated);
+  }
+
+  /// Replace the notes on an already-unlocked achievement.
+  Future<void> setNotes(String achievementId, String? notes) async {
+    final index =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (index == -1) return;
+    final a = state.allAchievements[index];
+    if (!a.isUnlocked) return;
+
+    final updated = a.copyWith(notes: notes);
+    _commitAchievement(index, updated);
+    await _persist(syncToRemote: updated);
+  }
+
+  /// Update visit details (date / notes / photos) for an already-unlocked
+  /// achievement. Syncs to Supabase so server stays authoritative on these
+  /// user-owned fields.
+  Future<void> updateVisitDetails(
+    String achievementId, {
+    DateTime? visitDate,
+    String? notes,
+    List<String>? photos,
+  }) async {
+    final index =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (index == -1) return;
+    final a = state.allAchievements[index];
+    if (!a.isUnlocked) return;
+
+    final updated = a.copyWith(
+      visitDate: visitDate ?? a.visitDate,
+      notes: notes,
+      photos: photos ?? a.photos,
+    );
+
+    final updatedAll = [...state.allAchievements];
+    updatedAll[index] = updated;
+    final ui = state.unlockedAchievements.indexWhere((u) => u.id == achievementId);
+    final updatedUnlocked = [...state.unlockedAchievements];
+    if (ui != -1) updatedUnlocked[ui] = updated;
+
+    state = state.copyWith(
+      allAchievements: updatedAll,
+      unlockedAchievements: updatedUnlocked,
+    );
+    await _persist(syncToRemote: updated);
+  }
+
+  /// Acknowledge a pending revisit — clears the pending flag.
+  /// The revisit data is already recorded; this just dismisses it from the UI.
+  Future<bool> acknowledgeRevisit(String achievementId) async {
+    final index =
+        state.allAchievements.indexWhere((a) => a.id == achievementId);
+    if (index == -1) return false;
+
+    final achievement = state.allAchievements[index];
+    if (!achievement.isPendingRevisit) return false;
+
+    final updated = achievement.copyWith(isPendingRevisit: false);
+
+    final updatedAll = [...state.allAchievements];
+    updatedAll[index] = updated;
+
+    state = state.copyWith(allAchievements: updatedAll);
+    await _persist();
+    return true;
   }
 
   // ── Dev Panel Methods ──────────────────────────────────────────────────────
@@ -602,6 +1136,24 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     final info = getCollectionInfo(collectionId);
     return info?.bonusXp ?? 50;
   }
+
+  static DateTime? _latestDate(DateTime? a, DateTime? b) {
+    if (a == null) return b;
+    if (b == null) return a;
+    return a.isAfter(b) ? a : b;
+  }
+
+  static List<DateTime> _unionTimestamps(
+      List<DateTime> a, List<DateTime> b) {
+    final seen = <int>{};
+    final out = <DateTime>[];
+    for (final d in [...a, ...b]) {
+      final ms = d.millisecondsSinceEpoch;
+      if (seen.add(ms)) out.add(d);
+    }
+    out.sort();
+    return out;
+  }
 }
 
 final achievementsProvider =
@@ -609,500 +1161,12 @@ final achievementsProvider =
   (ref) => AchievementsNotifier(ref),
 );
 
-// Combined achievement registry: local Netanya + travel achievements
+// Combined achievement registry: local Netanya + travel + lakes + glaciers
+// + deserts.
 final achievementRegistry = <Achievement>[
-  // ── Landmarks ──
-  Achievement(
-    id: 'tayelet-netanya',
-    title: 'The Netanya Promenade',
-    description: 'Walk along the famous clifftop promenade overlooking the Mediterranean',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3282,
-    longitude: 34.8485,
-    claimRadius: 300,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'coastal'],
-  ),
-  Achievement(
-    id: 'kikar-haatzmaut',
-    title: 'Independence Square',
-    description: 'Visit the vibrant heart of Netanya at Independence Square',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3290,
-    longitude: 34.8555,
-    claimRadius: 200,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'city-center'],
-  ),
-  Achievement(
-    id: 'glass-elevator',
-    title: 'The Glass Elevator',
-    description: 'Ride the panoramic glass elevator connecting the cliff to the beach',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3275,
-    longitude: 34.8487,
-    claimRadius: 150,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'scenic'],
-  ),
-  Achievement(
-    id: 'wingate-institute',
-    title: 'Wingate Institute',
-    description: 'Visit Israel\'s national center for physical education and sport',
-    tier: AchievementTier.platinum,
-    xpReward: 50,
-    latitude: 32.2780,
-    longitude: 34.8530,
-    claimRadius: 400,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'sports'],
-  ),
-  // ── Beaches ──
-  Achievement(
-    id: 'sironit-beach',
-    title: 'Sironit Beach',
-    description: 'Enjoy the popular Sironit Beach with its golden sands',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3340,
-    longitude: 34.8470,
-    claimRadius: 300,
-    collectionId: 'beaches',
-    tags: ['beaches', 'swimming'],
-  ),
-  Achievement(
-    id: 'herzl-beach',
-    title: 'Herzl Beach',
-    description: 'Relax at Herzl Beach, one of Netanya\'s most beloved shores',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3245,
-    longitude: 34.8475,
-    claimRadius: 300,
-    collectionId: 'beaches',
-    tags: ['beaches', 'swimming'],
-  ),
-  Achievement(
-    id: 'poleg-beach',
-    title: 'Poleg Beach',
-    description: 'Discover the scenic Poleg Beach at the southern edge of Netanya',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.2950,
-    longitude: 34.8420,
-    claimRadius: 400,
-    collectionId: 'beaches',
-    tags: ['beaches', 'nature'],
-  ),
-  Achievement(
-    id: 'blue-bay',
-    title: 'Blue Bay Beach',
-    description: 'Visit the beautiful Blue Bay Beach and its turquoise waters',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3140,
-    longitude: 34.8430,
-    claimRadius: 300,
-    collectionId: 'beaches',
-    tags: ['beaches', 'resort'],
-  ),
-  // ── Parks ──
-  Achievement(
-    id: 'nahal-alexander',
-    title: 'Alexander Stream Nature Reserve',
-    description: 'Explore the Alexander Stream where sea turtles nest',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.3740,
-    longitude: 34.8640,
-    claimRadius: 500,
-    collectionId: 'parks',
-    tags: ['parks', 'nature', 'wildlife'],
-  ),
-  Achievement(
-    id: 'gan-hamelech',
-    title: 'King\'s Garden & Amphitheatre',
-    description: 'Stroll through the King\'s Garden and its open-air amphitheatre',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3290,
-    longitude: 34.8500,
-    claimRadius: 200,
-    collectionId: 'parks',
-    tags: ['parks', 'culture'],
-  ),
-  Achievement(
-    id: 'utman-park',
-    title: 'Utman Garden Park',
-    description: 'Relax in the peaceful Utman Garden Park',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3200,
-    longitude: 34.8600,
-    claimRadius: 250,
-    collectionId: 'parks',
-    tags: ['parks', 'relaxation'],
-  ),
-  Achievement(
-    id: 'ir-yamim',
-    title: 'Ir Yamim Park',
-    description: 'Explore the expansive Ir Yamim Park in south Netanya',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.2870,
-    longitude: 34.8480,
-    claimRadius: 350,
-    collectionId: 'parks',
-    tags: ['parks', 'recreation'],
-  ),
-  // ── North Netanya — Landmarks ──
-  Achievement(
-    id: 'umm-khalid-fortress',
-    title: 'Umm Khalid Fortress',
-    description: 'Explore the ancient Crusader fortress ruins overlooking the northern coastline',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.3520,
-    longitude: 34.8490,
-    claimRadius: 250,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'history', 'ruins'],
-  ),
-  Achievement(
-    id: 'north-promenade-lookout',
-    title: 'North Cliff Lookout',
-    description: 'Take in the panoramic sea view from the northern promenade lookout point',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3430,
-    longitude: 34.8475,
-    claimRadius: 200,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'scenic', 'coastal'],
-  ),
-  // ── North Netanya — Beaches ──
-  Achievement(
-    id: 'argaman-beach',
-    title: 'Argaman Beach',
-    description: 'Discover the quiet Argaman Beach in northern Netanya, perfect for sunset walks',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3460,
-    longitude: 34.8460,
-    claimRadius: 300,
-    collectionId: 'beaches',
-    tags: ['beaches', 'quiet', 'sunset'],
-  ),
-  Achievement(
-    id: 'tzofit-beach',
-    title: 'Tzofit Beach',
-    description: 'Visit the scenic Tzofit Beach nestled beneath the northern cliffs',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3390,
-    longitude: 34.8465,
-    claimRadius: 300,
-    collectionId: 'beaches',
-    tags: ['beaches', 'cliffs', 'nature'],
-  ),
-  // ── North Netanya — Parks ──
-  Achievement(
-    id: 'park-raanana-junction',
-    title: 'Arison Park North',
-    description: 'Stroll through the green Arison Park on the northern edge of Netanya',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3500,
-    longitude: 34.8580,
-    claimRadius: 300,
-    collectionId: 'parks',
-    tags: ['parks', 'nature', 'walking'],
-  ),
-  // ── North Netanya — Culture ──
-  Achievement(
-    id: 'well-museum',
-    title: 'The Well House Museum',
-    description: 'Visit the historic Well House Museum documenting the founding of Netanya',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.3380,
-    longitude: 34.8560,
-    claimRadius: 200,
-    collectionId: 'culture',
-    tags: ['culture', 'history', 'museum'],
-  ),
-  // ── Culture ──
-  Achievement(
-    id: 'netanya-market',
-    title: 'The Netanya Market',
-    description: 'Browse the bustling Netanya Market for fresh produce and local flavors',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.3310,
-    longitude: 34.8570,
-    claimRadius: 200,
-    collectionId: 'culture',
-    tags: ['culture', 'food', 'shopping'],
-  ),
-  Achievement(
-    id: 'beit-haedut',
-    title: 'Beit HaEdut Museum',
-    description: 'Discover the history of immigration at the Beit HaEdut Museum',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.3290,
-    longitude: 34.8545,
-    claimRadius: 150,
-    collectionId: 'culture',
-    tags: ['culture', 'history', 'museum'],
-  ),
-  Achievement(
-    id: 'hasharon-mall',
-    title: 'HaSharon Mall',
-    description: 'Visit the HaSharon Mall, a major shopping and entertainment hub',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3170,
-    longitude: 34.8640,
-    claimRadius: 300,
-    collectionId: 'culture',
-    tags: ['culture', 'shopping', 'entertainment'],
-  ),
-  // ── More Landmarks ──
-  Achievement(
-    id: 'netanya-stadium',
-    title: 'Netanya Stadium',
-    description: 'Visit the home of Maccabi Netanya FC and its surrounding sports complex',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3100,
-    longitude: 34.8620,
-    claimRadius: 300,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'sports'],
-  ),
-  Achievement(
-    id: 'seasons-lookout',
-    title: 'Seasons Cliff Lookout',
-    description: 'Take in the breathtaking view from the lookout near the Seasons Hotel',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3268,
-    longitude: 34.8478,
-    claimRadius: 150,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'scenic', 'coastal'],
-  ),
-  Achievement(
-    id: 'founders-monument',
-    title: 'Founders Monument',
-    description: 'Visit the monument commemorating the founders of Netanya',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3285,
-    longitude: 34.8540,
-    claimRadius: 150,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'history'],
-  ),
-  Achievement(
-    id: 'old-train-station',
-    title: 'Old Netanya Train Station',
-    description: 'Discover the historic train station and its surrounding area',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3260,
-    longitude: 34.8590,
-    claimRadius: 200,
-    collectionId: 'landmarks',
-    tags: ['landmarks', 'history', 'transportation'],
-  ),
-  // ── More Beaches ──
-  Achievement(
-    id: 'kontiki-beach',
-    title: 'Kontiki Beach',
-    description: 'Relax at the charming Kontiki Beach with its laid-back atmosphere',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3210,
-    longitude: 34.8460,
-    claimRadius: 300,
-    collectionId: 'beaches',
-    tags: ['beaches', 'relaxation'],
-  ),
-  Achievement(
-    id: 'haonot-beach',
-    title: 'HaOnot Beach',
-    description: 'Visit HaOnot Beach tucked between the dramatic cliff inlets',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3350,
-    longitude: 34.8468,
-    claimRadius: 250,
-    collectionId: 'beaches',
-    tags: ['beaches', 'cliffs', 'scenic'],
-  ),
-  Achievement(
-    id: 'beit-yanai',
-    title: 'Beit Yanai Beach',
-    description: 'Discover the scenic Beit Yanai Beach at the Alexander Stream estuary',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.3890,
-    longitude: 34.8580,
-    claimRadius: 400,
-    collectionId: 'beaches',
-    tags: ['beaches', 'nature', 'river'],
-  ),
-  Achievement(
-    id: 'mikhmoret-beach',
-    title: 'Mikhmoret Beach',
-    description: 'Explore the unspoiled Mikhmoret Beach north of Netanya',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3950,
-    longitude: 34.8520,
-    claimRadius: 400,
-    collectionId: 'beaches',
-    tags: ['beaches', 'quiet', 'nature'],
-  ),
-  // ── More Parks ──
-  Achievement(
-    id: 'poleg-reserve',
-    title: 'Poleg Stream Nature Reserve',
-    description: 'Hike through the lush Poleg Stream nature reserve and its wetlands',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.2900,
-    longitude: 34.8450,
-    claimRadius: 400,
-    collectionId: 'parks',
-    tags: ['parks', 'nature', 'hiking', 'wildlife'],
-  ),
-  Achievement(
-    id: 'ramat-poleg-park',
-    title: 'Ramat Poleg Park',
-    description: 'Enjoy the open green spaces and playgrounds of Ramat Poleg',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.2920,
-    longitude: 34.8520,
-    claimRadius: 300,
-    collectionId: 'parks',
-    tags: ['parks', 'recreation', 'family'],
-  ),
-  Achievement(
-    id: 'iris-reserve',
-    title: 'Iris Nature Reserve',
-    description: 'Visit the rare coastal iris reserve, home to endangered Iris atropurpurea',
-    tier: AchievementTier.platinum,
-    xpReward: 50,
-    latitude: 32.3050,
-    longitude: 34.8650,
-    claimRadius: 350,
-    collectionId: 'parks',
-    tags: ['parks', 'nature', 'wildlife', 'rare'],
-  ),
-  // ── More Culture ──
-  Achievement(
-    id: 'netanya-gallery',
-    title: 'Netanya Municipal Gallery',
-    description: 'Browse contemporary art exhibitions at the municipal gallery',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3295,
-    longitude: 34.8548,
-    claimRadius: 150,
-    collectionId: 'culture',
-    tags: ['culture', 'art', 'museum'],
-  ),
-  Achievement(
-    id: 'cliff-sculptures',
-    title: 'Cliff-top Sculpture Garden',
-    description: 'Walk among the open-air sculptures along the cliff promenade',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3260,
-    longitude: 34.8490,
-    claimRadius: 250,
-    collectionId: 'culture',
-    tags: ['culture', 'art', 'outdoor'],
-  ),
-  Achievement(
-    id: 'diamond-center',
-    title: 'Diamond Industry Center',
-    description: 'Learn about Netanya\'s historic diamond polishing industry',
-    tier: AchievementTier.gold,
-    xpReward: 35,
-    latitude: 32.3180,
-    longitude: 34.8580,
-    claimRadius: 250,
-    collectionId: 'culture',
-    tags: ['culture', 'history', 'industry'],
-  ),
-  Achievement(
-    id: 'havatzelet',
-    title: 'Havatzelet HaSharon',
-    description: 'Explore the historic Havatzelet HaSharon village, one of the oldest settlements in the Sharon plain',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3600,
-    longitude: 34.8530,
-    claimRadius: 300,
-    collectionId: 'culture',
-    tags: ['culture', 'history', 'village'],
-  ),
-  Achievement(
-    id: 'bialik-street',
-    title: 'Bialik Cultural Street',
-    description: 'Stroll down Bialik Street with its cafes, shops, and cultural vibe',
-    tier: AchievementTier.bronze,
-    xpReward: 10,
-    latitude: 32.3300,
-    longitude: 34.8555,
-    claimRadius: 200,
-    collectionId: 'culture',
-    tags: ['culture', 'shopping', 'food'],
-  ),
-  Achievement(
-    id: 'uranus-bar',
-    title: 'Uranus Bar',
-    description: 'Grab a drink at the legendary Uranus Pub on Independence Square, a Netanya icon since the 1980s',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.3303,
-    longitude: 34.8514,
-    claimRadius: 100,
-    collectionId: 'culture',
-    tags: ['culture', 'nightlife', 'bar'],
-  ),
-  Achievement(
-    id: 'hansel-and-gretel',
-    title: 'Hansel & Gretel',
-    description: 'Enjoy craft beers at the Hansel & Gretel beer garden in south Netanya',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.2787,
-    longitude: 34.8639,
-    claimRadius: 100,
-    collectionId: 'culture',
-    tags: ['culture', 'nightlife', 'bar'],
-  ),
-  Achievement(
-    id: 'beer-shop',
-    title: 'Beer Shop',
-    description: 'Browse over 900 beers at the legendary Beer Shop on Ha-Bonim Street',
-    tier: AchievementTier.silver,
-    xpReward: 20,
-    latitude: 32.2808,
-    longitude: 34.8618,
-    claimRadius: 100,
-    collectionId: 'culture',
-    tags: ['culture', 'nightlife', 'bar'],
-  ),
-  // ── Travel Achievements ──
+  ...localAchievementRegistry,
   ...travelAchievementRegistry,
+  ...lakesAchievementRegistry,
+  ...glaciersAchievementRegistry,
+  ...desertsAchievementRegistry,
 ];

@@ -7,6 +7,7 @@ import 'package:mapbox_maps_flutter/mapbox_maps_flutter.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'package:supabase_flutter/supabase_flutter.dart';
 import 'package:travel_buddy_mobile/core/config/supabase_config.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/core/router/app_router.dart';
 import 'package:travel_buddy_mobile/shared/services/persistence_service.dart';
@@ -38,8 +39,10 @@ Future<void> main() async {
         anonKey: SupabaseConfig.supabaseAnonKey,
       );
       SupabaseConfig.initialized = true;
-    } catch (_) {
-      // Supabase init failed -- app will still work with local-only mode
+    } catch (e, st) {
+      // Supabase init failed -- app will still work with local-only mode.
+      // Sentry isn't initialised yet here, so this is debug-only.
+      logError(e, st, context: 'supabase.init');
     }
   }
 
@@ -53,8 +56,9 @@ Future<void> main() async {
   // but do NOT start it yet — permissions may not be granted
   try {
     await BackgroundService.initialize();
-  } catch (_) {
-    // Non-fatal: service just won't be available
+  } catch (e, st) {
+    // Non-fatal: service just won't be available. Sentry not yet initialised.
+    logError(e, st, context: 'backgroundService.initialize');
   }
 
   // Check if live tracking was enabled before app closed
@@ -123,18 +127,30 @@ class _TravelBuddyAppState extends ConsumerState<TravelBuddyApp>
       if (await permissionService.canStartBackgroundService()) {
         try {
           await BackgroundService.start();
-        } catch (_) {
+        } catch (e, st) {
           // Service failed to start — non-fatal
+          logError(e, st, context: 'backgroundService.start');
         }
       }
-    } catch (_) {
-      // Permission flow failed — app continues without background service
+    } catch (e, st) {
+      // Permission flow failed — app continues without background service.
+      // Unexpected here, so surface it to Sentry.
+      logError(e, st, context: 'permissionFlow', report: true);
     }
 
     // Restore live tracking if it was enabled before app closed
     if (widget.restoreTracking) {
       await _restoreTracking();
+    } else {
+      // Even without live tracking, fetch location once so the zone widget
+      // knows the user's current area immediately on app launch
+      await _fetchInitialLocation();
     }
+  }
+
+  Future<void> _fetchInitialLocation() async {
+    final geoNotifier = ref.read(geolocationProvider.notifier);
+    await geoNotifier.getCurrentLocation();
   }
 
   @override

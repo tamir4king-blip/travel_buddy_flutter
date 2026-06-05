@@ -9,6 +9,7 @@ import 'package:travel_buddy_mobile/features/activity_log/presentation/screens/a
 import 'package:travel_buddy_mobile/features/home/presentation/screens/home_screen.dart';
 import 'package:travel_buddy_mobile/features/leaderboard/presentation/screens/leaderboard_screen.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/profile_screen.dart';
+import 'package:travel_buddy_mobile/features/map/presentation/screens/map_screen.dart';
 import 'package:travel_buddy_mobile/features/map/providers/map_camera_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/geolocation_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/nearby_achievements_provider.dart';
@@ -36,6 +37,13 @@ class _AppShellState extends ConsumerState<AppShell>
   late AnimationController _navBarHideController;
   bool _wasOnMap = false;
 
+  // Map enter/exit crossfade (0 = tabs visible, 1 = map visible)
+  late AnimationController _mapEnterController;
+  bool _hasVisitedMap = false;
+  // Tracks the most recently active tab so it stays rendered behind the
+  // map fade — gives the crossfade something visible to fade into/out of.
+  int _lastTabIndex = 0;
+
   // Double-tap detection for explore button
   DateTime? _lastExploreTapTime;
 
@@ -54,28 +62,32 @@ class _AppShellState extends ConsumerState<AppShell>
     ProfileScreen(),
   ];
 
-  /// Whether the current route is one of the main tab pages.
-  bool _isMainTabRoute(BuildContext context) {
-    final location = GoRouterState.of(context).uri.path;
-    return _routes.contains(location);
-  }
+  // Single persistent MapScreen instance — mounted lazily on first visit and
+  // kept alive across navigation so its camera, zoom, and native view state
+  // survive switching to other tabs.
+  static const Widget _persistentMap = MapScreen();
 
   /// Whether the current route is the map page.
   bool _isMapRoute(BuildContext context) {
     return GoRouterState.of(context).uri.path == '/map';
   }
 
-  /// Returns IndexedStack for main tabs, map screen for /map, or GoRouter child for sub-routes.
+  /// Returns IndexedStack for main tabs, last-active-tab IndexedStack while
+  /// the map is being shown (so the crossfade has something to fade between),
+  /// or the GoRouter child for sub-routes.
   /// Wraps content in MediaQuery.removePadding to prevent SafeArea from
   /// double-counting the bottom inset (already handled by the content area's
   /// bottom: navBarHeight + bottomInset positioning).
   Widget _pageContent(int selectedIndex) {
-    final child = _isMainTabRoute(context)
-        ? IndexedStack(
-            index: selectedIndex,
-            children: _pageWidgets,
-          )
-        : widget.child;
+    final location = GoRouterState.of(context).uri.path;
+    final Widget child;
+    if (_routes.contains(location)) {
+      child = IndexedStack(index: selectedIndex, children: _pageWidgets);
+    } else if (location == '/map') {
+      child = IndexedStack(index: _lastTabIndex, children: _pageWidgets);
+    } else {
+      child = widget.child;
+    }
     return MediaQuery.removePadding(
       context: context,
       removeBottom: true,
@@ -98,6 +110,12 @@ class _AppShellState extends ConsumerState<AppShell>
       duration: const Duration(milliseconds: 350),
     );
     _navBarHideController.addListener(() => setState(() {}));
+
+    _mapEnterController = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 360),
+    );
+    _mapEnterController.addListener(() => setState(() {}));
   }
 
   @override
@@ -105,6 +123,7 @@ class _AppShellState extends ConsumerState<AppShell>
     _slideController.removeStatusListener(_onSlideAnimationStatus);
     _slideController.dispose();
     _navBarHideController.dispose();
+    _mapEnterController.dispose();
     super.dispose();
   }
 
@@ -232,13 +251,35 @@ class _AppShellState extends ConsumerState<AppShell>
   }
 
   void _onDestinationSelected(BuildContext context, int index) {
-    if (index >= 0 && index < _routes.length) {
+    if (index < 0 || index >= _routes.length) return;
+
+    // From the map page the slide-rendering path doesn't apply, so fall back
+    // to an instant route change. The map already animates its own exit.
+    if (_isMapRoute(context)) {
       _slideController.stop();
       _slideTargetIndex = null;
       _slideController.value = 0;
       _isSlideAnimating = false;
       context.go(_routes[index]);
+      return;
     }
+
+    final currentIndex = _currentIndex(context);
+    if (index == currentIndex || _isSlideAnimating) return;
+
+    HapticFeedback.selectionClick();
+
+    // Drive the same slide animation used for swipe — completion triggers
+    // the route change in [_onSlideAnimationStatus].
+    _previousIndex = currentIndex;
+    _slideTargetIndex = index;
+    _slideController.value = 0;
+    _isSlideAnimating = true;
+    _slideController.animateTo(
+      1.0,
+      duration: const Duration(milliseconds: 280),
+      curve: Curves.easeOutCubic,
+    );
   }
 
   void _onExploreTap(BuildContext context) {
@@ -283,26 +324,55 @@ class _AppShellState extends ConsumerState<AppShell>
     final nearbyState = ref.watch(nearbyAchievementsProvider);
     final selectedIndex = _currentIndex(context);
     final isOnMap = _isMapRoute(context);
-    // Animate nav bar hide/show when entering/exiting map
-    // Deferred to post-frame to avoid triggering rebuilds during build
-    if (isOnMap && !_wasOnMap) {
+    // Nav bar: watch immersive state to hide/show
+    final isImmersive = ref.watch(mapImmersiveProvider);
+    // When leaving the map, always reset immersive mode
+    if (!isOnMap && _wasOnMap) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (!mounted) return;
-        _navBarHideController.forward(from: 0);
-        ref.read(mapImmersiveProvider.notifier).state = true;
-      });
-    } else if (!isOnMap && _wasOnMap) {
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (!mounted) return;
-        _navBarHideController.reverse(from: 1);
         ref.read(mapImmersiveProvider.notifier).state = false;
+      });
+    }
+    // Sync nav bar animation with immersive state
+    if (isImmersive && _navBarHideController.status != AnimationStatus.forward &&
+        _navBarHideController.status != AnimationStatus.completed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _navBarHideController.forward();
+      });
+    } else if (!isImmersive && _navBarHideController.status != AnimationStatus.reverse &&
+        _navBarHideController.status != AnimationStatus.dismissed) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        _navBarHideController.reverse();
       });
     }
     _wasOnMap = isOnMap;
 
+    // Drive the map crossfade based on the current route.
+    if (isOnMap) {
+      _hasVisitedMap = true;
+      if (_mapEnterController.status != AnimationStatus.forward &&
+          _mapEnterController.status != AnimationStatus.completed) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _mapEnterController.forward();
+        });
+      }
+    } else if (_hasVisitedMap) {
+      if (_mapEnterController.status != AnimationStatus.reverse &&
+          _mapEnterController.status != AnimationStatus.dismissed) {
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          if (!mounted) return;
+          _mapEnterController.reverse();
+        });
+      }
+    }
+
     // Track previous index for horizontal swipe (only for tab pages)
     if (!isOnMap) {
       _previousIndex = selectedIndex;
+      _lastTabIndex = selectedIndex;
     }
 
     // Listen for newly discovered achievements — show in-app alert banner.
@@ -356,6 +426,9 @@ class _AppShellState extends ConsumerState<AppShell>
     final contentBottom = (navBarHeight + bottomInset) * (1 - navHideProgress);
     final navBarBottom = -(navBarHeight + bottomInset) * navHideProgress;
 
+    // Map crossfade progress (0 = tabs visible, 1 = map visible).
+    final mapEased = Curves.easeOutCubic.transform(_mapEnterController.value);
+
     final body = Stack(
       children: [
         // Page content area
@@ -364,61 +437,83 @@ class _AppShellState extends ConsumerState<AppShell>
           right: 0,
           top: 0,
           bottom: contentBottom,
-          child: Material(
-            color: isOnMap ? Colors.transparent : AppColors.bgDark,
-            child: isOnMap
-                // Map page — no horizontal swipe, rendered directly
-                ? _pageContent(selectedIndex)
-                // Tab pages — with horizontal swipe support
-                : GestureDetector(
-                    behavior: HitTestBehavior.translucent,
-                    onHorizontalDragStart: (details) {
-                      _onHorizontalDragStart(details);
-                    },
-                    onHorizontalDragUpdate: (details) {
-                      _onHorizontalDragUpdate(details, selectedIndex);
-                    },
-                    onHorizontalDragEnd: (details) {
-                      _onHorizontalDragEnd(details, selectedIndex);
-                    },
-                    child: ClipRect(
-                      child: Stack(
-                        children: [
-                          // Current page — slides with the finger
-                          Transform.translate(
-                            offset: Offset(slideTranslation, 0),
-                            child: SizedBox(
-                              width: screenWidth,
-                              child: ScrollConfiguration(
-                                behavior: _ClampingScrollBehavior(),
-                                child: _pageContent(selectedIndex),
-                              ),
-                            ),
-                          ),
-                          // Adjacent page — slides in from the opposite edge
-                          if (adjIndex != null)
+          child: Stack(
+            children: [
+              // Tabs layer — always there, fades out as map fades in.
+              Material(
+                color: AppColors.bgDark,
+                child: Opacity(
+                  opacity: 1 - mapEased,
+                  child: IgnorePointer(
+                    ignoring: isOnMap,
+                    child: GestureDetector(
+                      behavior: HitTestBehavior.translucent,
+                      onHorizontalDragStart: (details) {
+                        _onHorizontalDragStart(details);
+                      },
+                      onHorizontalDragUpdate: (details) {
+                        _onHorizontalDragUpdate(details, selectedIndex);
+                      },
+                      onHorizontalDragEnd: (details) {
+                        _onHorizontalDragEnd(details, selectedIndex);
+                      },
+                      child: ClipRect(
+                        child: Stack(
+                          children: [
+                            // Current page — slides with the finger
                             Transform.translate(
-                              offset: Offset(
-                                slideOffset > 0
-                                    ? -screenWidth + slideTranslation
-                                    : screenWidth + slideTranslation,
-                                0,
-                              ),
+                              offset: Offset(slideTranslation, 0),
                               child: SizedBox(
                                 width: screenWidth,
-                                height: double.infinity,
-                                child: Material(
-                                  color: AppColors.bgDark,
-                                  child: AbsorbPointer(
-                                    child: _pageWidgets[adjIndex],
-                                  ),
+                                child: ScrollConfiguration(
+                                  behavior: _ClampingScrollBehavior(),
+                                  child: _pageContent(selectedIndex),
                                 ),
                               ),
                             ),
-                        ],
+                            // Adjacent page — slides in from the opposite edge
+                            if (adjIndex != null)
+                              Transform.translate(
+                                offset: Offset(
+                                  slideOffset > 0
+                                      ? -screenWidth + slideTranslation
+                                      : screenWidth + slideTranslation,
+                                  0,
+                                ),
+                                child: SizedBox(
+                                  width: screenWidth,
+                                  height: double.infinity,
+                                  child: Material(
+                                    color: AppColors.bgDark,
+                                    child: AbsorbPointer(
+                                      child: _pageWidgets[adjIndex],
+                                    ),
+                                  ),
+                                ),
+                              ),
+                          ],
+                        ),
                       ),
                     ),
                   ),
+                ),
+              ),
+              // Persistent map layer — mounted lazily on first visit and kept
+              // alive afterwards so its native view + camera survive
+              // navigating to other tabs. Crossfades and slightly scales in
+              // for a smoother enter/exit feel.
+              if (_hasVisitedMap)
+                IgnorePointer(
+                  ignoring: !isOnMap,
+                  child: Opacity(
+                    opacity: mapEased,
+                    child: Transform.scale(
+                      scale: 0.97 + 0.03 * mapEased,
+                      child: _persistentMap,
+                    ),
+                  ),
+                ),
+            ],
           ),
         ),
 

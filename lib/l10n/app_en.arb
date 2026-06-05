@@ -48,6 +48,7 @@
   "@exploreCity": { "placeholders": { "city": { "type": "String" } } },
 
   "totalXp": "Total XP",
+  "totalSkillLevel": "Skill Level",
   "level": "Level",
   "trophies": "Trophies",
   "account": "Account",
