@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:math' as math;
 import 'dart:typed_data';
 import 'dart:ui' as ui;
@@ -9,10 +10,30 @@ import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:travel_buddy_mobile/features/map/models/map_marker_item.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/map_view_interface.dart';
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Layer / source ids. Markers and fog are rendered as *style layers* fed by
+// GeoJSON sources (not point annotations): the Mapbox engine then handles
+// clustering, zoom-interpolated sizing and hit-testing natively, which keeps
+// hundreds of pins smooth.
+// ─────────────────────────────────────────────────────────────────────────────
+const _kMarkerSourceId = 'tb-markers';
+const _kPinLayerId = 'tb-marker-pins';
+const _kClusterGlowLayerId = 'tb-cluster-glow';
+const _kClusterCoreLayerId = 'tb-cluster-core';
+const _kClusterCountLayerId = 'tb-cluster-count';
+const _kFogSourceId = 'tb-fog';
+const _kFogLayerId = 'tb-fog-fill';
+const _kFogEdgeSourceId = 'tb-fog-edge';
+const _kFogEdgeLayerId = 'tb-fog-edge-glow';
+
+const _kEmptyFeatureCollection = '{"type":"FeatureCollection","features":[]}';
+
+/// How dark the unexplored world is. 0 disables the effect visually.
+const _kFogOpacity = 0.55;
+
 /// Mobile map controller using Mapbox Maps SDK.
 class PlatformMapController extends MapViewController {
   MapboxMap? _mapboxMap;
-  PointAnnotationManager? _markerManager;
   bool _initialized = false;
 
   // Current state for rebuilds
@@ -21,8 +42,11 @@ class PlatformMapController extends MapViewController {
   double? _userLng;
   VoidCallback? onStateChanged;
 
-  // Cache: annotation ID → MapMarkerItem
-  final Map<String, MapMarkerItem> _annotationToMarker = {};
+  // Fog-of-war hole data (kept so it can be pushed once layers exist).
+  List<List<List<double>>> _fogPolygons = const [];
+  List<({double lat, double lng, double radius})> _fogCircles = const [];
+  bool _fogDirty = false;
+  bool _layersReady = false;
 
   // Radius circle / single-polygon preview (cleared on each new selection)
   PolygonAnnotationManager? _radiusManager;
@@ -31,12 +55,11 @@ class PlatformMapController extends MapViewController {
   // the radius preview — doesn't get wiped by pin taps).
   PolygonAnnotationManager? _unlockedAreasManager;
 
-  // Currently-selected marker (tapped) — draws the black arrow above.
+  // Currently-selected marker (tapped) — re-renders its pin with the black
+  // arrow indicator via a `selected` feature property.
   String? _selectedMarkerId;
   void Function(String? newId, String? previousId)? _onSelectionChanged;
 
-  /// Highlight a marker as "selected" — re-renders its pin with the black
-  /// arrow indicator. Pass null to clear the selection.
   @override
   void setSelectedMarker(String? markerId) {
     if (_selectedMarkerId == markerId) return;
@@ -69,20 +92,25 @@ class PlatformMapController extends MapViewController {
     _initialized = true;
   }
 
-  void setAnnotationManager(PointAnnotationManager manager) {
-    _markerManager = manager;
+  /// Called by the widget once the style has loaded and all sources/layers
+  /// have been created — fog data set before that point is flushed here.
+  Future<void> markLayersReady() async {
+    _layersReady = true;
+    if (_fogDirty) await _pushFog();
   }
 
   @override
   void flyTo(double lat, double lng, [double altitude = 2000]) {
     if (!_initialized || _mapboxMap == null) return;
-    final zoom = altitude < 3000 ? 14.0 : 12.0;
+    // Close fly-ins get a cinematic tilt; wider ones stay top-down.
+    final close = altitude < 3000;
     _mapboxMap!.flyTo(
       CameraOptions(
         center: Point(coordinates: Position(lng, lat)),
-        zoom: zoom,
+        zoom: close ? 14.5 : 12.0,
+        pitch: close ? 40.0 : 0.0,
       ),
-      MapAnimationOptions(duration: 1000),
+      MapAnimationOptions(duration: 1400),
     );
   }
 
@@ -94,6 +122,17 @@ class PlatformMapController extends MapViewController {
         center: Point(coordinates: Position(lng, lat)),
         zoom: zoom,
       ),
+      MapAnimationOptions(duration: durationMs),
+    );
+  }
+
+  /// Glide the camera to a point without changing zoom — used when a pin is
+  /// tapped so the map answers the touch (Zenly-style) instead of sitting
+  /// still under the popup.
+  Future<void> easeToPoint(double lat, double lng, {int durationMs = 600}) async {
+    if (!_initialized || _mapboxMap == null) return;
+    await _mapboxMap!.easeTo(
+      CameraOptions(center: Point(coordinates: Position(lng, lat))),
       MapAnimationOptions(duration: durationMs),
     );
   }
@@ -132,7 +171,7 @@ class PlatformMapController extends MapViewController {
   void resetCompass({int durationMs = 500}) {
     if (!_initialized || _mapboxMap == null) return;
     _mapboxMap!.flyTo(
-      CameraOptions(bearing: 0),
+      CameraOptions(bearing: 0, pitch: 0),
       MapAnimationOptions(duration: durationMs),
     );
   }
@@ -154,7 +193,9 @@ class PlatformMapController extends MapViewController {
     final state = await _mapboxMap!.getCameraState();
     final newZoom = (state.zoom - 1).clamp(0.0, 22.0);
     _mapboxMap!.flyTo(
-      CameraOptions(zoom: newZoom),
+      // Flatten the tilt as the user pulls away — keeps the wide view
+      // readable and lets the globe appear level at low zooms.
+      CameraOptions(zoom: newZoom, pitch: newZoom < 9 ? 0 : null),
       MapAnimationOptions(duration: durationMs),
     );
   }
@@ -165,7 +206,7 @@ class PlatformMapController extends MapViewController {
     await clearRadiusCircle();
 
     _radiusManager = await _mapboxMap!.annotations.createPolygonAnnotationManager();
-    final points = _geoCircle(lat, lng, radiusMeters, 64);
+    final points = geoCircle(lat, lng, radiusMeters, 64);
     await _radiusManager!.create(PolygonAnnotationOptions(
       geometry: Polygon(coordinates: [points.map((p) => Position(p.$2, p.$1)).toList()]),
       fillColor: _colorToArgbInt(color.withValues(alpha: 0.2)),
@@ -237,8 +278,99 @@ class PlatformMapController extends MapViewController {
     }
   }
 
+  // ── Fog of war ────────────────────────────────────────────────────────────
+
+  @override
+  Future<void> setFogOfWar({
+    required List<List<List<double>>> polygons,
+    required List<({double lat, double lng, double radius})> circles,
+  }) async {
+    _fogPolygons = polygons;
+    _fogCircles = circles;
+    _fogDirty = true;
+    if (_layersReady) await _pushFog();
+  }
+
+  @override
+  Future<void> clearFogOfWar() async {
+    _fogPolygons = const [];
+    _fogCircles = const [];
+    _fogDirty = true;
+    if (!_layersReady || _mapboxMap == null) return;
+    _fogDirty = false;
+    try {
+      await _mapboxMap!.style
+          .setStyleSourceProperty(_kFogSourceId, 'data', _kEmptyFeatureCollection);
+      await _mapboxMap!.style
+          .setStyleSourceProperty(_kFogEdgeSourceId, 'data', _kEmptyFeatureCollection);
+    } catch (e, st) {
+      logError(e, st, context: 'map.clearFog');
+    }
+  }
+
+  /// Build the fog polygon (world rectangle + one interior ring per unlocked
+  /// area) and the matching glow outlines, then push both sources.
+  Future<void> _pushFog() async {
+    final map = _mapboxMap;
+    if (map == null) return;
+    _fogDirty = false;
+
+    // Hole rings in GeoJSON order ([lng, lat]).
+    final holes = <List<List<double>>>[];
+    for (final ring in _fogPolygons) {
+      if (ring.length < 3) continue;
+      final coords = ring.map((p) => [p[1], p[0]]).toList();
+      if (coords.first[0] != coords.last[0] || coords.first[1] != coords.last[1]) {
+        coords.add(coords.first);
+      }
+      holes.add(coords);
+    }
+    for (final c in _fogCircles) {
+      holes.add(geoCircle(c.lat, c.lng, c.radius, 48)
+          .map((p) => [p.$2, p.$1])
+          .toList());
+    }
+
+    // World-covering outer ring. Latitude is clamped short of the poles so
+    // the rectangle stays valid in both mercator and globe projections.
+    const world = [
+      [-180.0, -85.0],
+      [180.0, -85.0],
+      [180.0, 85.0],
+      [-180.0, 85.0],
+      [-180.0, -85.0],
+    ];
+
+    final fog = jsonEncode({
+      'type': 'Feature',
+      'properties': <String, dynamic>{},
+      'geometry': {
+        'type': 'Polygon',
+        'coordinates': [world, ...holes],
+      },
+    });
+
+    // The teal "discovered edge" glow gets its own source so the world
+    // rectangle's border isn't outlined too.
+    final edges = jsonEncode({
+      'type': 'Feature',
+      'properties': <String, dynamic>{},
+      'geometry': {
+        'type': 'MultiLineString',
+        'coordinates': holes,
+      },
+    });
+
+    try {
+      await map.style.setStyleSourceProperty(_kFogSourceId, 'data', fog);
+      await map.style.setStyleSourceProperty(_kFogEdgeSourceId, 'data', edges);
+    } catch (e, st) {
+      logError(e, st, context: 'map.pushFog');
+    }
+  }
+
   /// Generate geo-circle points (lat, lng) around a center.
-  static List<(double, double)> _geoCircle(double lat, double lng, double radiusM, int segments) {
+  static List<(double, double)> geoCircle(double lat, double lng, double radiusM, int segments) {
     const earthRadius = 6371000.0;
     final latRad = lat * math.pi / 180;
     final lngRad = lng * math.pi / 180;
@@ -262,7 +394,6 @@ class PlatformMapController extends MapViewController {
   void dispose() {
     _radiusManager = null;
     _unlockedAreasManager = null;
-    _markerManager = null;
     _mapboxMap = null;
   }
 }
@@ -372,166 +503,38 @@ class PlatformMapViewWidget extends StatefulWidget {
 }
 
 class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
-  // Cached marker icons keyed by composite state.
-  // Key: "<argb>|<codePoint>|<locked>|<selected>"
-  final Map<String, Uint8List> _iconCache = {};
-  bool _iconsReady = false;
-  Cancelable? _tapCancelable;
+  MapboxMap? _map;
+  bool _layersReady = false;
   bool _syncing = false;
+  bool _resyncQueued = false;
 
-  // Previous marker set for diffing
-  Set<MapMarkerItem> _previousMarkers = {};
-  // Reverse lookup: marker ID → annotation ID (for removal)
-  final Map<String, String> _markerIdToAnnotationId = {};
+  /// Style-image ids already registered with the map, so each distinct pin
+  /// look (color × icon × locked × selected) is rasterized exactly once.
+  final Set<String> _registeredIcons = {};
+
+  /// Signature of the last pushed feature set (marker ids + selection) so
+  /// unchanged updates skip the JSON re-encode entirely.
+  String? _lastFeatureSignature;
 
   @override
   void initState() {
     super.initState();
     widget.controller.onStateChanged = () {
-      if (mounted) _syncAnnotations();
+      if (mounted) _syncMarkers();
     };
-    widget.controller._onSelectionChanged = _onSelectionChanged;
-    _prepareIcons();
+    widget.controller._onSelectionChanged = (_, __) {
+      if (mounted) _syncMarkers();
+    };
   }
 
-  @override
-  void dispose() {
-    _tapCancelable?.cancel();
-    super.dispose();
-  }
-
-  Future<void> _prepareIcons() async {
-    // Warm-start: icon PNGs are lazily rendered on first use. We only flip
-    // the ready flag so `_syncAnnotations` can proceed.
-    _iconsReady = true;
-    if (mounted) _syncAnnotations();
-  }
-
-  String _cacheKey(MapMarkerItem item, bool selected) {
-    return '${item.pinColor.toARGB32()}|${item.iconData.codePoint}|'
-        '${item.isLocked ? 1 : 0}|${selected ? 1 : 0}';
-  }
-
-  Future<Uint8List> _getIcon(MapMarkerItem item, {bool selected = false}) async {
-    final key = _cacheKey(item, selected);
-    var png = _iconCache[key];
-    if (png != null) return png;
-    png = await _renderMarkerIcon(
-      tierColor: item.pinColor,
-      icon: item.iconData,
-      locked: item.isLocked,
-      selected: selected,
-    );
-    _iconCache[key] = png;
-    return png;
-  }
-
-  /// Re-render a single pin when its selection state changes. Previously
-  /// selected pin (if any) is reverted to the non-selected PNG.
-  Future<void> _onSelectionChanged(String? newId, String? previousId) async {
-    final manager = widget.controller._markerManager;
-    if (manager == null) return;
-    for (final change in [
-      if (previousId != null) (previousId, false),
-      if (newId != null) (newId, true),
-    ]) {
-      final (markerId, selected) = change;
-      final annotationId = _markerIdToAnnotationId[markerId];
-      if (annotationId == null) continue;
-      final marker = widget.controller._annotationToMarker[annotationId];
-      if (marker == null) continue;
-      final icon = await _getIcon(marker, selected: selected);
-      try {
-        await manager.update(PointAnnotation(
-          id: annotationId,
-          geometry: Point(
-              coordinates: Position(marker.longitude, marker.latitude)),
-          image: icon,
-          iconSize: 0.8,
-        ));
-      } catch (e, st) {
-        // Annotation may have been removed
-        logError(e, st, context: 'map.updateAnnotation');
-      }
-    }
-  }
-
-  Future<void> _syncAnnotations() async {
-    final manager = widget.controller._markerManager;
-    if (manager == null || !_iconsReady) return;
-
-    // Prevent overlapping syncs
-    if (_syncing) return;
-    _syncing = true;
-
-    try {
-      final ctrl = widget.controller;
-      final newMarkers = ctrl.markers.toSet();
-
-      // Diff: find what to remove and what to add
-      final toRemove = _previousMarkers.difference(newMarkers);
-      final toAdd = newMarkers.difference(_previousMarkers);
-
-      // Nothing changed — skip entirely
-      if (toRemove.isEmpty && toAdd.isEmpty) return;
-
-      // Remove old annotations
-      if (toRemove.isNotEmpty) {
-        final annotationIdsToRemove = <String>[];
-        for (final item in toRemove) {
-          final annotationId = _markerIdToAnnotationId.remove(item.id);
-          if (annotationId != null) {
-            ctrl._annotationToMarker.remove(annotationId);
-            annotationIdsToRemove.add(annotationId);
-          }
-        }
-        // Delete individually by looking up the PointAnnotation objects
-        for (final annId in annotationIdsToRemove) {
-          try {
-            await manager.delete(PointAnnotation(id: annId, geometry: Point(coordinates: Position(0, 0))));
-          } catch (e, st) {
-            // Annotation may already be gone
-            logError(e, st, context: 'map.deleteAnnotation');
-          }
-        }
-      }
-
-      // Add new annotations
-      if (toAdd.isNotEmpty) {
-        final options = <PointAnnotationOptions>[];
-        final addItems = <MapMarkerItem>[];
-
-        for (final item in toAdd) {
-          final selected = widget.controller._selectedMarkerId == item.id;
-          final icon = await _getIcon(item, selected: selected);
-          options.add(PointAnnotationOptions(
-            geometry: Point(coordinates: Position(item.longitude, item.latitude)),
-            image: icon,
-            iconSize: 0.8,
-          ));
-          addItems.add(item);
-        }
-
-        final annotations = await manager.createMulti(options);
-        for (var i = 0; i < annotations.length; i++) {
-          final annotation = annotations[i];
-          if (annotation != null) {
-            ctrl._annotationToMarker[annotation.id] = addItems[i];
-            _markerIdToAnnotationId[addItems[i].id] = annotation.id;
-          }
-        }
-      }
-
-      _previousMarkers = newMarkers;
-    } finally {
-      _syncing = false;
-    }
-  }
+  // ── Style setup ───────────────────────────────────────────────────────────
 
   void _onMapCreated(MapboxMap mapboxMap) async {
+    _map = mapboxMap;
     widget.controller.attachMap(mapboxMap);
 
-    // Lock the map orientation — no rotation (always north-up) and no pitch.
+    // No rotation (always north-up) and no pitch *gestures* — the camera
+    // still pitches programmatically for cinematic fly-ins.
     await mapboxMap.gestures.updateSettings(GesturesSettings(
       rotateEnabled: false,
       pitchEnabled: false,
@@ -545,23 +548,323 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
       pulsingColor: _colorToArgbInt(AppColors.info),
     ));
 
-    // Create annotation manager for markers
-    final manager = await mapboxMap.annotations.createPointAnnotationManager();
-    widget.controller.setAnnotationManager(manager);
-
-    // Listen for marker taps
-    _tapCancelable = manager.tapEvents(onTap: (annotation) {
-      final item = widget.controller._annotationToMarker[annotation.id];
-      if (item != null) {
-        widget.controller.onMarkerClick?.call(item.id, item.type);
-      }
-    });
-
-    // Sync markers if data already available
-    _syncAnnotations();
-
-    // Notify that the map is ready
     widget.onMapReady?.call();
+  }
+
+  void _onStyleLoaded(StyleLoadedEventData data) async {
+    final map = _map;
+    if (map == null) return;
+    try {
+      await _applyBrandStyle(map);
+      await _createFogLayers(map);
+      await _createMarkerLayers(map);
+      _layersReady = true;
+      await widget.controller.markLayersReady();
+      await _syncMarkers();
+    } catch (e, st) {
+      logError(e, st, context: 'map.styleSetup', report: true);
+    }
+  }
+
+  /// Tint the stock dark style toward the app palette and switch the
+  /// projection to a globe so zooming out lands on a planet, not a wall map.
+  Future<void> _applyBrandStyle(MapboxMap map) async {
+    try {
+      await map.style
+          .setProjection(StyleProjection(name: StyleProjectionName.globe));
+    } catch (e, st) {
+      logError(e, st, context: 'map.setProjection');
+    }
+
+    // Best-effort recolors — layer ids vary between style versions, so each
+    // tweak is independent and non-fatal.
+    Future<void> tryPaint(String layerId, String property, String value) async {
+      try {
+        if (await map.style.styleLayerExists(layerId)) {
+          await map.style.setStyleLayerProperty(layerId, property, value);
+        }
+      } catch (_) {
+        // Layer/property not present in this style — skip.
+      }
+    }
+
+    await tryPaint('water', 'fill-color', '"#0E2438"');
+    await tryPaint('land', 'background-color', '"#0B1120"');
+    await tryPaint('background', 'background-color', '"#0B1120"');
+  }
+
+  Future<void> _createFogLayers(MapboxMap map) async {
+    await map.style.addSource(GeoJsonSource(
+      id: _kFogSourceId,
+      data: _kEmptyFeatureCollection,
+    ));
+    await map.style.addSource(GeoJsonSource(
+      id: _kFogEdgeSourceId,
+      data: _kEmptyFeatureCollection,
+    ));
+
+    await map.style.addLayer(FillLayer(
+      id: _kFogLayerId,
+      sourceId: _kFogSourceId,
+      fillColor: _colorToArgbInt(AppColors.bgDark),
+      fillOpacity: _kFogOpacity,
+      fillAntialias: true,
+    ));
+
+    // Soft teal glow along the border between explored and unexplored.
+    await map.style.addLayer(LineLayer(
+      id: _kFogEdgeLayerId,
+      sourceId: _kFogEdgeSourceId,
+      lineColor: _colorToArgbInt(AppColors.primaryLight),
+      lineWidth: 1.6,
+      lineBlur: 4.0,
+      lineOpacity: 0.7,
+    ));
+  }
+
+  Future<void> _createMarkerLayers(MapboxMap map) async {
+    await map.style.addSource(GeoJsonSource(
+      id: _kMarkerSourceId,
+      data: _kEmptyFeatureCollection,
+      cluster: true,
+      clusterRadius: 55,
+      clusterMaxZoom: 13,
+    ));
+
+    // Halo behind cluster bubbles.
+    await map.style.addLayer(CircleLayer(
+      id: _kClusterGlowLayerId,
+      sourceId: _kMarkerSourceId,
+      filter: ['has', 'point_count'],
+      circleColor: _colorToArgbInt(AppColors.primary),
+      circleOpacity: 0.22,
+      circleBlur: 0.7,
+      circleRadiusExpression: [
+        'step', ['get', 'point_count'],
+        24, 25, 30, 100, 38,
+      ],
+    ));
+
+    // Cluster bubble.
+    await map.style.addLayer(CircleLayer(
+      id: _kClusterCoreLayerId,
+      sourceId: _kMarkerSourceId,
+      filter: ['has', 'point_count'],
+      circleColor: _colorToArgbInt(AppColors.primary),
+      circleStrokeColor: _colorToArgbInt(AppColors.primaryLight),
+      circleStrokeWidth: 1.5,
+      circleRadiusExpression: [
+        'step', ['get', 'point_count'],
+        15, 25, 19, 100, 25,
+      ],
+    ));
+
+    // Cluster count label.
+    await map.style.addLayer(SymbolLayer(
+      id: _kClusterCountLayerId,
+      sourceId: _kMarkerSourceId,
+      filter: ['has', 'point_count'],
+      textFieldExpression: ['get', 'point_count_abbreviated'],
+      textFont: ['DIN Pro Medium', 'Arial Unicode MS Regular'],
+      textSize: 13,
+      textColor: _colorToArgbInt(Colors.white),
+      textAllowOverlap: true,
+      textIgnorePlacement: true,
+    ));
+
+    // Individual pins — icon image chosen per-feature, sized by zoom so pins
+    // gently grow as you approach street level (selected pins run larger).
+    await map.style.addLayer(SymbolLayer(
+      id: _kPinLayerId,
+      sourceId: _kMarkerSourceId,
+      filter: [
+        '!', ['has', 'point_count'],
+      ],
+      iconImageExpression: ['get', 'icon'],
+      iconAllowOverlap: true,
+      iconIgnorePlacement: true,
+      iconSizeExpression: [
+        'interpolate', ['linear'], ['zoom'],
+        3, ['case', ['==', ['get', 'selected'], 1], 0.36, 0.28],
+        10, ['case', ['==', ['get', 'selected'], 1], 0.52, 0.42],
+        16, ['case', ['==', ['get', 'selected'], 1], 0.64, 0.52],
+      ],
+    ));
+  }
+
+  // ── Marker sync ───────────────────────────────────────────────────────────
+
+  String _iconKey(MapMarkerItem item, bool selected) {
+    return 'tb-pin-${item.pinColor.toARGB32()}-${item.iconData.codePoint}-'
+        '${item.isLocked ? 1 : 0}-${selected ? 1 : 0}';
+  }
+
+  Future<void> _ensureIconRegistered(MapMarkerItem item, bool selected) async {
+    final map = _map;
+    if (map == null) return;
+    final key = _iconKey(item, selected);
+    if (_registeredIcons.contains(key)) return;
+
+    final png = await _renderMarkerIcon(
+      tierColor: item.pinColor,
+      icon: item.iconData,
+      locked: item.isLocked,
+      selected: selected,
+    );
+    await map.style.addStyleImage(
+      key,
+      1.0,
+      MbxImage(width: 96, height: 96, data: png),
+      false,
+      const [],
+      const [],
+      null,
+    );
+    _registeredIcons.add(key);
+  }
+
+  /// Push the current marker list into the GeoJSON source. The Mapbox engine
+  /// takes it from there (clustering, layout, rendering) — no per-annotation
+  /// bookkeeping.
+  Future<void> _syncMarkers() async {
+    final map = _map;
+    if (map == null || !_layersReady) return;
+    if (_syncing) {
+      _resyncQueued = true;
+      return;
+    }
+    _syncing = true;
+
+    try {
+      final items = widget.controller.markers;
+      final selectedId = widget.controller._selectedMarkerId;
+
+      final signature = StringBuffer()..write(selectedId ?? '');
+      for (final m in items) {
+        signature.write('|${m.hashCode}');
+      }
+      final sig = signature.toString();
+      if (sig == _lastFeatureSignature) return;
+
+      final features = <Map<String, dynamic>>[];
+      for (final item in items) {
+        final selected = item.id == selectedId;
+        await _ensureIconRegistered(item, selected);
+        features.add({
+          'type': 'Feature',
+          'id': item.id.hashCode,
+          'properties': {
+            'id': item.id,
+            'type': item.type.name,
+            'icon': _iconKey(item, selected),
+            'selected': selected ? 1 : 0,
+          },
+          'geometry': {
+            'type': 'Point',
+            'coordinates': [item.longitude, item.latitude],
+          },
+        });
+      }
+
+      await map.style.setStyleSourceProperty(
+        _kMarkerSourceId,
+        'data',
+        jsonEncode({'type': 'FeatureCollection', 'features': features}),
+      );
+      _lastFeatureSignature = sig;
+    } catch (e, st) {
+      logError(e, st, context: 'map.syncMarkers', report: true);
+    } finally {
+      _syncing = false;
+      if (_resyncQueued) {
+        _resyncQueued = false;
+        Future.microtask(_syncMarkers);
+      }
+    }
+  }
+
+  // ── Tap routing ───────────────────────────────────────────────────────────
+
+  /// Hit-test pins and clusters around the touch point. Clusters zoom in,
+  /// pins notify the screen, anything else falls through to onMapClick.
+  Future<void> _handleTap(MapContentGestureContext context) async {
+    final map = _map;
+    final coords = context.point.coordinates;
+
+    if (map != null && _layersReady) {
+      try {
+        final touch = context.touchPosition;
+        final features = await map.queryRenderedFeatures(
+          RenderedQueryGeometry.fromScreenBox(ScreenBox(
+            min: ScreenCoordinate(x: touch.x - 22, y: touch.y - 22),
+            max: ScreenCoordinate(x: touch.x + 22, y: touch.y + 22),
+          )),
+          RenderedQueryOptions(
+            layerIds: [_kPinLayerId, _kClusterCoreLayerId],
+            filter: null,
+          ),
+        );
+
+        for (final f in features) {
+          if (f == null) continue;
+          final feature = f.queriedFeature.feature;
+          final props =
+              (feature['properties'] as Map?)?.cast<Object?, Object?>() ?? {};
+
+          if (props['cluster'] == true) {
+            await _expandCluster(map, feature);
+            return;
+          }
+
+          final markerId = props['id'] as String?;
+          final typeName = props['type'] as String?;
+          if (markerId != null && typeName != null) {
+            final type = MapMarkerType.values.asNameMap()[typeName];
+            if (type != null) {
+              widget.controller.onMarkerClick?.call(markerId, type);
+              return;
+            }
+          }
+        }
+      } catch (e, st) {
+        logError(e, st, context: 'map.tapQuery');
+      }
+    }
+
+    widget.controller.onMapClick?.call(
+      coords.lat.toDouble(),
+      coords.lng.toDouble(),
+    );
+  }
+
+  Future<void> _expandCluster(MapboxMap map, Map<Object?, Object?> feature) async {
+    try {
+      final geometry = (feature['geometry'] as Map?)?.cast<Object?, Object?>();
+      final coordinates = (geometry?['coordinates'] as List?)?.cast<num>();
+      if (coordinates == null || coordinates.length < 2) return;
+
+      final expansion = await map.getGeoJsonClusterExpansionZoom(
+        _kMarkerSourceId,
+        feature.map((k, v) => MapEntry(k?.toString(), v)),
+      );
+      final zoom = double.tryParse(expansion.value ?? '') ?? 0;
+      final state = await map.getCameraState();
+
+      await map.easeTo(
+        CameraOptions(
+          center: Point(
+            coordinates: Position(
+              coordinates[0].toDouble(),
+              coordinates[1].toDouble(),
+            ),
+          ),
+          zoom: math.max(zoom + 0.4, state.zoom + 1),
+        ),
+        MapAnimationOptions(duration: 550),
+      );
+    } catch (e, st) {
+      logError(e, st, context: 'map.expandCluster');
+    }
   }
 
   @override
@@ -575,18 +878,13 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
         center: Point(coordinates: Position(centerLng, centerLat)),
         zoom: defaultZoom,
       ),
-      styleUri: MapboxStyles.MAPBOX_STREETS,
+      styleUri: MapboxStyles.DARK,
       onMapCreated: _onMapCreated,
+      onStyleLoadedListener: _onStyleLoaded,
       onCameraChangeListener: (_) {
         widget.controller.onCameraChanged?.call();
       },
-      onTapListener: (context) {
-        final coords = context.point.coordinates;
-        widget.controller.onMapClick?.call(
-          coords.lat.toDouble(),
-          coords.lng.toDouble(),
-        );
-      },
+      onTapListener: _handleTap,
       onLongTapListener: (context) {
         final coords = context.point.coordinates;
         widget.controller.onMapLongPress?.call(

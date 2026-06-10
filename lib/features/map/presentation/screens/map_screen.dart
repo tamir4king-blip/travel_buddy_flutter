@@ -65,6 +65,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
   // Memoized per-collection overlay state so we don't re-render every frame.
   String? _lastUnlockedAreasSignature;
 
+  // Memoized fog-of-war state (unlocked ids) — fog only re-renders on change.
+  String? _lastFogSignature;
+
   // Detail sheet state (achievements route to the canonical
   // AchievementDetailSheet — only quest/skill/chain use the inline sheet).
   SideQuest? _selectedQuest;
@@ -372,6 +375,11 @@ class _MapScreenState extends ConsumerState<MapScreen>
     // Mark the pin as selected — draws the black arrow above it
     _mapController.setSelectedMarker(markerId);
 
+    // Answer the touch: a tick in the hand and a camera glide to the pin
+    // (popup is screen-fixed at the top, so this never chases its own anchor).
+    HapticFeedback.lightImpact();
+    _mapController.easeToPoint(lat, lng);
+
     setState(() => _showPopup = true);
     _popupAnimController.forward(from: 0);
 
@@ -622,6 +630,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
   }
 
   void _centerOnUser() {
+    HapticFeedback.selectionClick();
     final geo = ref.read(geolocationProvider);
     if (geo.hasLocation) {
       _mapController.flyTo(geo.latitude!, geo.longitude!, 2000);
@@ -754,6 +763,9 @@ class _MapScreenState extends ConsumerState<MapScreen>
     // persistently so the user can see their coverage while navigating.
     _updateUnlockedAreasOverlay(achievements, filter);
 
+    // Fog of war — unexplored world stays dark; visited areas are revealed.
+    _updateFogOfWar(achievements);
+
     // Only update user location if it changed
     if (geo.hasLocation) {
       if (_lastUserLat != geo.latitude || _lastUserLng != geo.longitude) {
@@ -811,6 +823,40 @@ class _MapScreenState extends ConsumerState<MapScreen>
       _lastUnlockedAreasSignature = memberSignature;
       await _mapController.showUnlockedAreasOverlay(areas);
     }
+  }
+
+  /// Minimum radius (meters) revealed around a point-based unlock — claim
+  /// radii are often tiny (50–500 m), too small to read as "explored".
+  static const _fogRevealMinRadius = 1500.0;
+
+  /// Recompute the fog-of-war holes from unlocked achievements. Polygon
+  /// achievements (zones, countries) punch their exact shape; point-based
+  /// ones reveal a circle around the place.
+  Future<void> _updateFogOfWar(AchievementsState achievements) async {
+    final polygons = <List<List<double>>>[];
+    final circles = <({double lat, double lng, double radius})>[];
+    final sig = StringBuffer();
+
+    for (final a in achievements.allAchievements) {
+      if (!a.isUnlocked) continue;
+      if (a.hasPolygon) {
+        polygons.add(a.claimPolygon!);
+        sig.write('${a.id}p;');
+      } else if (a.latitude != null && a.longitude != null) {
+        final r = (a.claimRadius ?? _fogRevealMinRadius);
+        circles.add((
+          lat: a.latitude!,
+          lng: a.longitude!,
+          radius: r < _fogRevealMinRadius ? _fogRevealMinRadius : r,
+        ));
+        sig.write('${a.id}c;');
+      }
+    }
+
+    final signature = sig.toString();
+    if (signature == _lastFogSignature) return;
+    _lastFogSignature = signature;
+    await _mapController.setFogOfWar(polygons: polygons, circles: circles);
   }
 
 

@@ -49,6 +49,17 @@ abstract class MapViewController {
   /// Remove the unlocked-areas overlay.
   Future<void> clearUnlockedAreasOverlay();
 
+  /// Cover the world in a dark "fog of war", with holes punched where the
+  /// user has unlocked content. [polygons] are explicit hole rings
+  /// (`[[lat,lng], ...]`); [circles] are radius-based holes around a point.
+  Future<void> setFogOfWar({
+    required List<List<List<double>>> polygons,
+    required List<({double lat, double lng, double radius})> circles,
+  });
+
+  /// Remove the fog-of-war overlay entirely.
+  Future<void> clearFogOfWar();
+
   void dispose();
 }
 
