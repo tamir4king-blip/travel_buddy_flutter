@@ -48,21 +48,34 @@ void main() {
   // (polygons, photos, adjusted XP) — those stay authoritative.
   buf
     ..writeln('-- ${achievements.length} achievement definitions (insert-if-missing)')
-    ..writeln('insert into public.achievement_definitions (id, title, tier, xp_reward, collection_id) values');
+    ..writeln('insert into public.achievement_definitions (id, title, description, tier, xp_reward, collection_id) values');
   buf.writeln(achievements
       .map((a) =>
-          '  (${q(a.id)}, ${q(a.title)}, ${q(a.tier.name)}, ${a.xpReward}, ${q(a.collectionId)})')
+          '  (${q(a.id)}, ${q(a.title)}, ${q(a.description)}, ${q(a.tier.name)}, ${a.xpReward}, ${q(a.collectionId)})')
       .join(',\n'));
   buf
     ..writeln('on conflict (id) do nothing;')
     ..writeln();
 
   // Quests: registry-owned tables — overwrite on conflict.
-  final quests = [
+  final rawQuests = [
     for (final s in questRegistry)
       (id: s.id, title: s.title, xp: s.xpReward, max: s.maxCompletions, source: 'activity'),
     for (final c in storyQuestRegistry)
       (id: c.id, title: c.title, xp: c.xpReward, max: 1, source: 'story'),
+  ];
+  // Dedupe by id (first wins — matches the client's indexWhere lookups).
+  // Duplicate ids are registry bugs; surface them loudly.
+  final seenQuestIds = <String>{};
+  final quests = [
+    for (final r in rawQuests)
+      if (seenQuestIds.add(r.id))
+        r
+      else
+        ...(() {
+          stderr.writeln('WARNING: duplicate quest id "${r.id}" skipped — fix the registry!');
+          return <({String id, String title, int xp, int max, String source})>[];
+        }()),
   ];
   buf
     ..writeln('-- ${quests.length} quest definitions (${questRegistry.length} activities + ${storyQuestRegistry.length} story chains)')

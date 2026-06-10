@@ -1494,7 +1494,10 @@ const netanyaQuests = <SideQuest>[
   ),
   // ── Wellness ──
   SideQuest(
-    id: 'beach-yoga', title: 'Beach Yoga',
+    // Renamed from 'beach-yoga': that id already belongs to the global
+    // wellness quest, and duplicate ids break id-keyed lookups (the first
+    // entry shadows this one) and the XP definition seeds.
+    id: 'netanya-beach-yoga', title: 'Beach Yoga',
     description: 'Do a yoga session on a Netanya beach',
     category: 'wellness', skillType: 'yogi',
     difficulty: QuestDifficulty.easy, xpReward: 30,
