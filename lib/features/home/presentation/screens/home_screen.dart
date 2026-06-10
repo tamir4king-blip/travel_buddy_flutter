@@ -37,7 +37,12 @@ part '../widgets/home_zone_detail_sheet.dart';
 part '../widgets/home_pending_claims.dart';
 
 class HomeScreen extends ConsumerStatefulWidget {
-  const HomeScreen({super.key});
+  /// When non-null, the dashboard is embedded in the draggable home map
+  /// sheet: scrolling is driven by the sheet's controller and the screen
+  /// skips its own SafeArea/background chrome.
+  final ScrollController? sheetScrollController;
+
+  const HomeScreen({super.key, this.sheetScrollController});
 
   @override
   ConsumerState<HomeScreen> createState() => _HomeScreenState();
@@ -110,12 +115,9 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
     final gridCols = ResponsiveLayout.gridColumns(context, mobile: 2, tablet: 3, desktop: 4);
     final isComplete = achievements.completedCollections;
 
-    return SafeArea(
-      child: ResponsiveLayout(
-        child: AnimatedBackground(
-          accentColor: AppColors.primary,
-          child: CustomScrollView(
-            slivers: [
+    final scrollView = CustomScrollView(
+      controller: widget.sheetScrollController,
+      slivers: [
               SliverToBoxAdapter(
                 child: Padding(
                   padding: const EdgeInsets.fromLTRB(20, 32, 20, 0),
@@ -213,8 +215,20 @@ class _HomeScreenState extends ConsumerState<HomeScreen>
               ),
 
               const SliverToBoxAdapter(child: SizedBox(height: 120)),
-            ],
-          ),
+      ],
+    );
+
+    // Embedded in the home map sheet — the sheet provides the surface and
+    // drives scrolling; AnimatedBackground would just paint over it.
+    if (widget.sheetScrollController != null) {
+      return ResponsiveLayout(child: scrollView);
+    }
+
+    return SafeArea(
+      child: ResponsiveLayout(
+        child: AnimatedBackground(
+          accentColor: AppColors.primary,
+          child: scrollView,
         ),
       ),
     );

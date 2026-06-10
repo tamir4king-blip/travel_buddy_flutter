@@ -6,7 +6,7 @@ import 'package:lucide_icons/lucide_icons.dart';
 import 'package:travel_buddy_mobile/l10n/app_localizations.dart';
 import 'package:travel_buddy_mobile/core/theme/app_theme.dart';
 import 'package:travel_buddy_mobile/features/activity_log/presentation/screens/activity_log_screen.dart';
-import 'package:travel_buddy_mobile/features/home/presentation/screens/home_screen.dart';
+import 'package:travel_buddy_mobile/features/home/presentation/widgets/home_map_sheet.dart';
 import 'package:travel_buddy_mobile/features/leaderboard/presentation/screens/leaderboard_screen.dart';
 import 'package:travel_buddy_mobile/features/profile/presentation/screens/profile_screen.dart';
 import 'package:travel_buddy_mobile/features/map/presentation/screens/map_screen.dart';
@@ -56,7 +56,9 @@ class _AppShellState extends ConsumerState<AppShell>
   static const _routes = ['/', '/log', '/leaderboard', '/profile'];
 
   static const _pageWidgets = <Widget>[
-    HomeScreen(),
+    // Home is not a page anymore — it renders as a draggable sheet over the
+    // live map canvas (see the HomeMapSheet layer in build).
+    SizedBox.shrink(),
     ActivityLogScreen(),
     LeaderboardScreen(),
     ProfileScreen(),
@@ -324,6 +326,22 @@ class _AppShellState extends ConsumerState<AppShell>
     final nearbyState = ref.watch(nearbyAchievementsProvider);
     final selectedIndex = _currentIndex(context);
     final isOnMap = _isMapRoute(context);
+    // Home shows the live map behind the dashboard sheet — both routes keep
+    // the canvas visible and interactive.
+    final isHome = GoRouterState.of(context).uri.path == '/';
+    final showCanvas = isOnMap || isHome;
+
+    // Tell MapScreen which face to wear: bare canvas under the home sheet,
+    // or the full experience with chrome. Post-frame to avoid provider
+    // writes during build; the GlobalKey inside MapScreen keeps the native
+    // view alive across the switch.
+    final wantBackdrop = isHome && !isOnMap;
+    if (ref.read(mapBackdropProvider) != wantBackdrop) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (!mounted) return;
+        ref.read(mapBackdropProvider.notifier).state = wantBackdrop;
+      });
+    }
     // Nav bar: watch immersive state to hide/show
     final isImmersive = ref.watch(mapImmersiveProvider);
     // When leaving the map, always reset immersive mode
@@ -349,8 +367,9 @@ class _AppShellState extends ConsumerState<AppShell>
     }
     _wasOnMap = isOnMap;
 
-    // Drive the map crossfade based on the current route.
-    if (isOnMap) {
+    // Drive the map crossfade based on the current route (map page OR home
+    // canvas — the map stays put when moving between the two).
+    if (showCanvas) {
       _hasVisitedMap = true;
       if (_mapEnterController.status != AnimationStatus.forward &&
           _mapEnterController.status != AnimationStatus.completed) {
@@ -445,7 +464,7 @@ class _AppShellState extends ConsumerState<AppShell>
                 child: Opacity(
                   opacity: 1 - mapEased,
                   child: IgnorePointer(
-                    ignoring: isOnMap,
+                    ignoring: showCanvas,
                     child: GestureDetector(
                       behavior: HitTestBehavior.translucent,
                       onHorizontalDragStart: (details) {
@@ -504,12 +523,26 @@ class _AppShellState extends ConsumerState<AppShell>
               // for a smoother enter/exit feel.
               if (_hasVisitedMap)
                 IgnorePointer(
-                  ignoring: !isOnMap,
+                  ignoring: !showCanvas,
                   child: Opacity(
                     opacity: mapEased,
                     child: Transform.scale(
                       scale: 0.97 + 0.03 * mapEased,
                       child: _persistentMap,
+                    ),
+                  ),
+                ),
+
+              // Home dashboard sheet — floats over the live canvas. Stays
+              // mounted (hidden) on other routes so its drag position and
+              // the dashboard's state survive tab switches.
+              if (_hasVisitedMap)
+                Positioned.fill(
+                  child: IgnorePointer(
+                    ignoring: !isHome,
+                    child: Opacity(
+                      opacity: isOnMap ? 0.0 : mapEased,
+                      child: const HomeMapSheet(),
                     ),
                   ),
                 ),

@@ -46,3 +46,10 @@ final mapImmersiveProvider = StateProvider<bool>((ref) => false);
 /// expanded. Lifted to a provider so the popover can be rendered as an
 /// overlay on the map area while the trigger lives in the top bar banner.
 final mapZoneSettingsOpenProvider = StateProvider<bool>((ref) => false);
+
+/// Backdrop mode: the map is rendered as the living canvas behind the Home
+/// dashboard sheet — bare map only (no search bar, controls, or popups).
+/// AppShell sets this based on the current route; MapScreen renders a
+/// minimal tree while it's true (the native map view survives the switch
+/// via a GlobalKey).
+final mapBackdropProvider = StateProvider<bool>((ref) => false);

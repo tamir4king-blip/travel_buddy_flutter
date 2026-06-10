@@ -107,12 +107,18 @@ The `AppShell` provides the bottom navigation and hosts the map persistently
 **Quests**, **Skills**, **Achievements**, **Leaderboard**, **Profile**, plus an
 **Activity Log**.
 
-### Home dashboard (`/`)
-The landing screen. Shows a unified profile card (level, XP progress, streak),
-pending trophy claims, pending quest-chain claims, a **Nearby Zone** card
-(what's around you right now), top skills, an achievement breakdown by
-region/collection, and a tabbed **Collections** explorer (countries globe view +
-local collection cards).
+### Home dashboard (`/`) — map-first canvas
+Home is a **draggable dashboard sheet over the live map** (Bump/Zenly model):
+the persistent map shows through as a full-bleed canvas (in "backdrop mode" —
+bare map, no chrome; see `mapBackdropProvider`), with floating level/location/
+streak chips on the exposed area and the dashboard in a snap-anchored sheet
+(collapsed / peek / full). The sheet content is the classic dashboard: unified
+profile card (level, XP progress, streak), pending trophy claims, pending
+quest-chain claims, a **Nearby Zone** card, top skills, an achievement
+breakdown, and the tabbed **Collections** explorer. On a cold start the canvas
+opens on the globe and dives to the user's location at first GPS fix.
+Tapping Explore opens the full map experience (`/map`) — the canvas never
+reloads, only the chrome changes.
 
 ### Interactive map (`/map`)
 A full Mapbox map centered on the user. Renders achievement/quest/skill markers,

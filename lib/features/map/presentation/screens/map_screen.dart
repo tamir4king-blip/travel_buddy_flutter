@@ -51,8 +51,12 @@ class MapScreen extends ConsumerStatefulWidget {
 class _MapScreenState extends ConsumerState<MapScreen>
     with TickerProviderStateMixin {
   late final PlatformMapController _mapController;
-  bool _mapReady = false;
   bool _mapInitialized = false;
+  bool _didInitialFly = false;
+
+  // Keeps the native map view alive when the tree switches between the
+  // full map experience and the bare home-backdrop canvas.
+  final GlobalKey _mapViewKey = GlobalKey();
 
   // Cached provider references — captured early so dispose() never touches ref
   late final StateController<CachedCameraState?> _cameraStateNotifier;
@@ -215,8 +219,6 @@ class _MapScreenState extends ConsumerState<MapScreen>
     if (!mounted) return;
     setState(() => _mapInitialized = true);
     _controlsFadeController.forward();
-
-    _mapReady = true;
   }
 
   void _onMapClick(double lat, double lng) {
@@ -234,6 +236,19 @@ class _MapScreenState extends ConsumerState<MapScreen>
 
   void _onMarkerClick(String markerId, MapMarkerType type) {
     if (!mounted) return;
+
+    // Backdrop mode: popups live in the full-map chrome, so a pin tap just
+    // answers with a glide + tick. The full experience is one Explore tap away.
+    if (ref.read(mapBackdropProvider)) {
+      final marker =
+          _lastMarkers?.where((m) => m.id == markerId).firstOrNull;
+      if (marker != null) {
+        HapticFeedback.lightImpact();
+        _mapController.easeToPoint(marker.latitude, marker.longitude);
+      }
+      return;
+    }
+
     _dismissLongPressMenu();
 
     // Prevent the map-click handler from also firing for this touch
@@ -775,8 +790,12 @@ class _MapScreenState extends ConsumerState<MapScreen>
       }
     }
 
-    if (!_mapReady && geo.hasLocation) {
-      _mapReady = true;
+    // First GPS fix of the session: dive from the launch globe down to the
+    // user. A dedicated flag (not _mapReady) so the fly-in still happens
+    // when the map finishes initializing before the GPS does — which is the
+    // normal cold-start order now that the canvas opens with the app.
+    if (!_didInitialFly && geo.hasLocation) {
+      _didInitialFly = true;
       final cached = ref.read(cachedCameraStateProvider);
       if (cached == null) {
         _mapController.flyTo(geo.latitude!, geo.longitude!, 5000);
@@ -1496,6 +1515,28 @@ class _MapScreenState extends ConsumerState<MapScreen>
     // Update map entities whenever state changes
     WidgetsBinding.instance.addPostFrameCallback((_) => _updateMapState());
 
+    final mapView = PlatformMapViewWidget(
+      key: _mapViewKey,
+      controller: _mapController,
+      onMapReady: _onMapReady,
+    );
+
+    // Backdrop mode — the map is the canvas behind the Home sheet: bare,
+    // full-bleed, interactive, with all chrome stripped. The GlobalKey above
+    // reparents the native view without recreating it.
+    if (ref.watch(mapBackdropProvider)) {
+      return Material(
+        type: MaterialType.transparency,
+        child: Stack(
+          children: [
+            Positioned.fill(child: mapView),
+            if (!_mapInitialized)
+              Positioned.fill(child: _MapLoadingShimmer()),
+          ],
+        ),
+      );
+    }
+
     return PopScope(
       canPop:
           !_showDetailSheet && !_showFilterSheet && !_showAdvancedSheet,
@@ -1574,12 +1615,7 @@ class _MapScreenState extends ConsumerState<MapScreen>
               child: Stack(
                 children: [
                   // Platform map (fills the area below the top bar)
-                  Positioned.fill(
-                    child: PlatformMapViewWidget(
-                      controller: _mapController,
-                      onMapReady: _onMapReady,
-                    ),
-                  ),
+                  Positioned.fill(child: mapView),
 
                   // Loading shimmer overlay
                   if (!_mapInitialized)
@@ -1607,13 +1643,19 @@ class _MapScreenState extends ConsumerState<MapScreen>
                     const SizedBox(height: 10),
                     _MapControlButton(
                       icon: LucideIcons.plus,
-                      onTap: () => _mapController.zoomIn(),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        _mapController.zoomIn();
+                      },
                       tooltip: l10n.mapZoomIn,
                     ),
                     const SizedBox(height: 10),
                     _MapControlButton(
                       icon: LucideIcons.minus,
-                      onTap: () => _mapController.zoomOut(),
+                      onTap: () {
+                        HapticFeedback.selectionClick();
+                        _mapController.zoomOut();
+                      },
                       tooltip: l10n.mapZoomOut,
                     ),
                     const SizedBox(height: 10),
