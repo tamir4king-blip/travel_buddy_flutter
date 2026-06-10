@@ -1,5 +1,7 @@
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:travel_buddy_mobile/shared/utils/geo_utils.dart';
+import 'package:travel_buddy_mobile/shared/utils/achievement_merge.dart';
+import 'package:travel_buddy_mobile/shared/utils/xp_rules.dart';
 import 'package:travel_buddy_mobile/core/config/supabase_config.dart';
 import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:travel_buddy_mobile/shared/models/achievement.dart';
@@ -225,8 +227,10 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
           .eq('user_id', userId);
 
       if (rows.isEmpty) {
-        // No remote data — push local unlocked achievements to Supabase
-        _syncAllToRemote();
+        // No remote data — push local unlocked achievements to Supabase,
+        // then pull back the profile the server-side XP triggers updated.
+        await _syncAllToRemote();
+        await ref.read(userProfileProvider.notifier).reloadFromRemote();
         return;
       }
 
@@ -247,57 +251,18 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
         final remote = remoteMap[a.id];
         if (remote == null) continue;
 
-        // Parse remote revisit fields
-        final remoteVisitCount = remote['visit_count'] as int? ?? 0;
-        final remoteLastVisitedAt = remote['last_visited_at'] != null
-            ? DateTime.tryParse(remote['last_visited_at'] as String)
-            : null;
-        final remoteRevisitHistory =
-            (remote['revisit_history'] as List<dynamic>?)
-                    ?.map((d) => DateTime.parse(d as String))
-                    .toList() ??
-                const <DateTime>[];
+        final merged = mergeRemoteRow(a, remote);
+        if (merged == null) continue;
 
+        updatedAll[i] = merged;
         if (!a.isUnlocked) {
-          // Remote says unlocked but local doesn't — restore full state
-          updatedAll[i] = a.copyWith(
-            isUnlocked: true,
-            unlockedAt:
-                DateTime.tryParse(remote['unlocked_at'] as String? ?? ''),
-            visitDate: remote['visit_date'] != null
-                ? DateTime.tryParse(remote['visit_date'] as String)
-                : null,
-            notes: remote['notes'] as String?,
-            isRetroactive: remote['is_retroactive'] as bool? ?? false,
-            photos: (remote['photos'] as List<dynamic>?)?.cast<String>() ??
-                const [],
-            visitCount: remoteVisitCount,
-            lastVisitedAt: remoteLastVisitedAt,
-            revisitHistory: remoteRevisitHistory,
-          );
-          updatedUnlocked.add(updatedAll[i]);
-          changed = true;
+          // Remote says unlocked but local doesn't — restored full state
+          updatedUnlocked.add(merged);
         } else {
-          // Already unlocked locally — merge revisit data (CRDT-style)
-          final mergedCount =
-              remoteVisitCount > a.visitCount ? remoteVisitCount : a.visitCount;
-          final mergedLastVisited = _latestDate(a.lastVisitedAt, remoteLastVisitedAt);
-          final mergedHistory = _unionTimestamps(a.revisitHistory, remoteRevisitHistory);
-
-          if (mergedCount != a.visitCount ||
-              mergedLastVisited != a.lastVisitedAt ||
-              mergedHistory.length != a.revisitHistory.length) {
-            updatedAll[i] = a.copyWith(
-              visitCount: mergedCount,
-              lastVisitedAt: mergedLastVisited,
-              revisitHistory: mergedHistory,
-            );
-            final unlockedIdx =
-                updatedUnlocked.indexWhere((u) => u.id == a.id);
-            if (unlockedIdx != -1) updatedUnlocked[unlockedIdx] = updatedAll[i];
-            changed = true;
-          }
+          final unlockedIdx = updatedUnlocked.indexWhere((u) => u.id == a.id);
+          if (unlockedIdx != -1) updatedUnlocked[unlockedIdx] = merged;
         }
+        changed = true;
       }
 
       // Also fetch completed collections from remote
@@ -341,17 +306,47 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
       //   - unlocks made offline are synced up
       //   - revisit counts/history made offline are synced up
       //   - remote stays authoritative for cross-device restore
-      _syncAllToRemote();
+      await _syncAllToRemote();
+
+      // Server-side triggers may have just awarded XP for rows that only
+      // existed locally — pull the authoritative total back down.
+      await ref.read(userProfileProvider.notifier).reloadFromRemote();
     } catch (e, st) {
       // Local data is primary, retry on next sync
       logError(e, st, context: 'achievements.syncWithRemote', report: true);
     }
   }
 
-  /// Push all locally unlocked achievements to Supabase.
+  /// Push all locally unlocked achievements to Supabase in one batched
+  /// upsert (instead of a round trip per achievement).
   Future<void> _syncAllToRemote() async {
-    for (final a in state.unlockedAchievements) {
-      await _upsertAchievementToRemote(a);
+    if (!SupabaseConfig.isConfigured) return;
+    if (state.unlockedAchievements.isEmpty) return;
+    try {
+      final client = ref.read(supabaseClientProvider);
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) return;
+
+      // Same column set as _upsertAchievementToRemote: visit_count,
+      // last_visited_at and revisit_history stay owned by register_revisit.
+      final rows = state.unlockedAchievements
+          .map((a) => {
+                'user_id': userId,
+                'achievement_id': a.id,
+                'unlocked_at': a.unlockedAt?.toIso8601String(),
+                'visit_date': a.visitDate?.toIso8601String(),
+                'notes': a.notes,
+                'is_retroactive': a.isRetroactive,
+                'photos': a.photos,
+              })
+          .toList();
+
+      await client
+          .from('user_achievements')
+          .upsert(rows, onConflict: 'user_id,achievement_id');
+    } catch (e, st) {
+      // Will retry on next sync
+      logError(e, st, context: 'achievements.syncAllToRemote', report: true);
     }
   }
 
@@ -737,8 +732,8 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
     );
 
     // Award XP (slightly reduced for retroactive claims)
-    final xpMultiplier = isRetroactive ? 0.8 : 1.0;
-    final xpAwarded = (achievement.xpReward * xpMultiplier).round();
+    final xpAwarded =
+        XpRules.achievementXp(achievement.xpReward, isRetroactive: isRetroactive);
     ref.read(userProfileProvider.notifier).addXp(xpAwarded);
 
     // Award collection bonus XP if newly completed
@@ -1134,25 +1129,7 @@ class AchievementsNotifier extends StateNotifier<AchievementsState> {
 
   int _collectionBonusXp(String collectionId) {
     final info = getCollectionInfo(collectionId);
-    return info?.bonusXp ?? 50;
-  }
-
-  static DateTime? _latestDate(DateTime? a, DateTime? b) {
-    if (a == null) return b;
-    if (b == null) return a;
-    return a.isAfter(b) ? a : b;
-  }
-
-  static List<DateTime> _unionTimestamps(
-      List<DateTime> a, List<DateTime> b) {
-    final seen = <int>{};
-    final out = <DateTime>[];
-    for (final d in [...a, ...b]) {
-      final ms = d.millisecondsSinceEpoch;
-      if (seen.add(ms)) out.add(d);
-    }
-    out.sort();
-    return out;
+    return info?.bonusXp ?? XpRules.defaultCollectionBonus;
   }
 }
 

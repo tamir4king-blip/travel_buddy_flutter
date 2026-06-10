@@ -566,11 +566,6 @@ class _PlatformMapViewWidgetState extends State<PlatformMapViewWidget> {
 
   @override
   Widget build(BuildContext context) {
-    final ctrl = widget.controller;
-    final userLat = ctrl.userLat;
-    final userLng = ctrl.userLng;
-    final hasLocation = userLat != null && userLng != null;
-
     final centerLng = 0.0;
     final centerLat = 20.0;
     final defaultZoom = 1.0;

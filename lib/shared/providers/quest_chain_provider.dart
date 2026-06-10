@@ -1,10 +1,13 @@
 import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:travel_buddy_mobile/core/config/supabase_config.dart';
+import 'package:travel_buddy_mobile/core/utils/error_logger.dart';
 import 'package:travel_buddy_mobile/shared/data/story_quest_registry.dart';
 import 'package:travel_buddy_mobile/shared/models/quest.dart';
 import 'package:travel_buddy_mobile/shared/providers/achievements_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/persistence_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/quests_provider.dart';
+import 'package:travel_buddy_mobile/shared/providers/supabase_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/user_profile_provider.dart';
 
 class QuestChainState {
@@ -174,9 +177,32 @@ class QuestChainNotifier extends StateNotifier<QuestChainState> {
     state = QuestChainState(allQuests: updated);
     _persist();
 
-    // Award quest completion XP on claim.
+    // Optimistic local XP; the server awards the authoritative XP via the
+    // user_quest_completions trigger when the claim row below arrives.
     _ref.read(userProfileProvider.notifier).addXp(quest.xpReward);
+    _syncClaimToRemote(quest.id);
     return true;
+  }
+
+  /// Record a claimed story quest in user_quest_completions so the
+  /// server-side XP trigger prices it (story quests are seeded into
+  /// quest_definitions with max_completions = 1). Fire-and-forget.
+  Future<void> _syncClaimToRemote(String questId) async {
+    if (!SupabaseConfig.isConfigured) return;
+    try {
+      final client = _ref.read(supabaseClientProvider);
+      final userId = client.auth.currentUser?.id;
+      if (userId == null) return;
+
+      await client.from('user_quest_completions').upsert({
+        'user_id': userId,
+        'quest_id': questId,
+        'completion_count': 1,
+      }, onConflict: 'user_id,quest_id');
+    } catch (e, st) {
+      // Local state is primary; the claim stays recorded locally.
+      logError(e, st, context: 'questChain.syncClaimToRemote', report: true);
+    }
   }
 
   /// Start tracking a quest (makes it active).

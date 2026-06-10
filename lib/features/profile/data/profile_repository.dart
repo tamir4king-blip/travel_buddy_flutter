@@ -38,6 +38,11 @@ class ProfileRepository {
   }
 
   /// Upserts the user profile to the remote `profiles` table.
+  ///
+  /// total_xp / level / is_premium are deliberately NOT sent: those columns
+  /// are server-owned (computed by XP triggers) and the column-level grants
+  /// added in 20260610000002_server_authoritative_xp.sql reject any
+  /// statement that touches them.
   Future<void> syncProfileToRemote(UserProfile profile) async {
     try {
       final userId = _client.auth.currentUser?.id;
@@ -49,10 +54,7 @@ class ProfileRepository {
         'username': profile.username,
         'bio': profile.bio,
         'avatar_url': profile.avatarUrl,
-        'total_xp': profile.totalXp,
-        'level': profile.level,
         'is_public': profile.isPublic,
-        'is_premium': profile.isPremium,
       });
     } catch (e, st) {
       // Local persistence is primary

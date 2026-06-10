@@ -8,6 +8,7 @@ import 'package:travel_buddy_mobile/shared/providers/persistence_provider.dart';
 import 'package:travel_buddy_mobile/shared/providers/supabase_provider.dart';
 import 'package:travel_buddy_mobile/shared/data/quest_registry.dart';
 import 'package:travel_buddy_mobile/shared/data/skill_registry.dart';
+import 'package:travel_buddy_mobile/shared/utils/xp_rules.dart';
 
 class QuestsState {
   final List<SideQuest> allQuests;
@@ -298,7 +299,11 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
       }
 
       // Push any locally-higher values to remote
-      _syncToRemote();
+      await _syncToRemote();
+
+      // Server-side triggers may have just awarded XP for completions that
+      // only existed locally — pull the authoritative total back down.
+      await ref.read(userProfileProvider.notifier).reloadFromRemote();
     } catch (e, st) {
       // Local data is primary
       logError(e, st, context: 'quests.syncWithRemote', report: true);
@@ -357,17 +362,20 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
     updatedQuests[index] = completed;
 
     // Calculate XP with diminishing returns for repeats
-    var xpEarned = _calculateQuestXp(quest.xpReward, newCount);
+    final xpEarned = XpRules.questXp(quest.xpReward, newCount);
 
-    // 15% bonus XP when photos are provided
+    // 15% bonus on *skill* XP when photos are provided. Profile/total XP
+    // stays unboosted so it matches the server-side award (the server
+    // can't verify photos — see XpRules.withPhotoBonus).
+    var skillXpEarned = xpEarned;
     if (photos != null && photos.isNotEmpty) {
-      xpEarned = (xpEarned * 1.15).round();
+      skillXpEarned = XpRules.withPhotoBonus(xpEarned);
     }
 
     // Update skill XP
     final updatedSkillXp = Map<String, int>.from(state.skillXp);
     final currentSkillXp = updatedSkillXp[quest.skillType] ?? 0;
-    updatedSkillXp[quest.skillType] = currentSkillXp + xpEarned;
+    updatedSkillXp[quest.skillType] = currentSkillXp + skillXpEarned;
 
     // Update skill level
     final updatedSkillLevels = Map<String, int>.from(state.skillLevels);
@@ -489,14 +497,6 @@ class QuestsNotifier extends StateNotifier<QuestsState> {
       currentStreak: 0,
     );
     _persist();
-  }
-
-  int _calculateQuestXp(int baseXp, int completionCount) {
-    // Diminishing returns: 100%, 75%, 50%, 25% for repeats
-    if (completionCount <= 1) return baseXp;
-    if (completionCount == 2) return (baseXp * 0.75).round();
-    if (completionCount == 3) return (baseXp * 0.50).round();
-    return (baseXp * 0.25).round();
   }
 
   int _calculateSkillLevel(int skillXp, String skillType) {
